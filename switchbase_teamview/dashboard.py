@@ -115,6 +115,16 @@ class DashboardService:
         self._ranking_cache = (now + self.ranking_ttl_seconds, payload)
         return payload
 
+    def get_public_ranking(self, ranking_type: str) -> dict[str, Any]:
+        rankings = self.get_rankings()
+        if ranking_type not in rankings:
+            raise TeamViewError(f"Unsupported ranking_type: {ranking_type}")
+        return {
+            "ranking_type": ranking_type,
+            "items": rankings[ranking_type],
+            "generated_at": int(self.now_provider().astimezone(self.timezone).timestamp()),
+        }
+
     def set_alias(self, *, email: str, alias: str) -> dict[str, str]:
         normalized_email = email.strip()
         if not normalized_email:

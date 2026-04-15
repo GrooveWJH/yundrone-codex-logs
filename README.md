@@ -49,6 +49,7 @@ SWITCHBASE_TEAMVIEW_ALIAS_FILE=./teamview_aliases.json
 SWITCHBASE_TEAMVIEW_TIMEZONE=Asia/Shanghai
 SWITCHBASE_TEAMVIEW_WEB_HOST=127.0.0.1
 SWITCHBASE_TEAMVIEW_WEB_PORT=8000
+SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN=change_this_to_a_long_random_token
 ```
 
 说明：
@@ -98,6 +99,27 @@ http://127.0.0.1:8000
 - 固定时间段的全员用量
 - 日榜 / 周榜 / 月榜总量排行
 - 邮箱主键的别名维护
+
+## 给 Aily / 外部调度器使用的公开榜单接口
+
+服务额外提供了 3 个只读接口：
+
+- `/api/public-rankings/daily?token=...`
+- `/api/public-rankings/weekly?token=...`
+- `/api/public-rankings/monthly?token=...`
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8000/api/public-rankings/daily?token=$SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN"
+```
+
+说明：
+
+- `token` 来自 `.env` 中的 `SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN`
+- 这是一层“带随机 key 的 URL 门槛”，适合 Aily 这类外部定时器直接拉取
+- 它能降低被随手扫到就拿到数据的风险，但**不等于严格鉴权**
+- 如果后续要长期公网开放，建议再叠加 IP 限制、反向代理鉴权或签名校验
 
 ## 测试
 

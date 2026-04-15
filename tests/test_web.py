@@ -74,3 +74,35 @@ def test_web_app_updates_alias_by_email() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"email": "alice@example.com", "alias": "Alice Ops"}
+
+
+def test_web_app_exposes_public_ranking_endpoints_with_token() -> None:
+    create_app = getattr(web_module, "create_app", None)
+    assert create_app is not None
+
+    class FakeService:
+        def get_dashboard(self, *, preset=None, start_timestamp=None, end_timestamp=None):
+            return {"meta": {}, "summary": {}, "members": []}
+
+        def get_rankings(self):
+            return {"daily": [], "weekly": [], "monthly": []}
+
+        def get_public_ranking(self, ranking_type: str):
+            return {
+                "ranking_type": ranking_type,
+                "items": [{"email": "alice@example.com", "display_name": "Alice Ops", "used_tokens": 120}],
+            }
+
+        def set_alias(self, *, email: str, alias: str):
+            return {"email": email, "alias": alias}
+
+    app = create_app(service=FakeService(), public_token="weird-token")
+    client = TestClient(app)
+
+    forbidden = client.get("/api/public-rankings/daily", params={"token": "bad-token"})
+    allowed = client.get("/api/public-rankings/monthly", params={"token": "weird-token"})
+
+    assert forbidden.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json()["ranking_type"] == "monthly"
+    assert allowed.json()["items"][0]["used_tokens"] == 120

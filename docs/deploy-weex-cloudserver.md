@@ -42,12 +42,57 @@ SWITCHBASE_TEAMVIEW_ALIAS_FILE=./teamview_aliases.json
 SWITCHBASE_TEAMVIEW_TIMEZONE=Asia/Shanghai
 SWITCHBASE_TEAMVIEW_WEB_HOST=0.0.0.0
 SWITCHBASE_TEAMVIEW_WEB_PORT=47593
+SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN=***
 ```
 
 说明：
 
 - API Key 真实值只保留在服务器上的 `.env`，不要写回仓库
 - 别名文件以邮箱为主键，保留在部署目录根下
+- 公开榜单接口使用单独随机 token，方便 Aily 这类外部调度器调用
+
+## Aily 使用的公开榜单接口
+
+当前服务额外暴露了 3 个只读接口：
+
+```text
+GET /api/public-rankings/daily?token=...
+GET /api/public-rankings/weekly?token=...
+GET /api/public-rankings/monthly?token=...
+```
+
+返回结构示例：
+
+```json
+{
+  "ranking_type": "daily",
+  "items": [
+    {
+      "email": "alice@example.com",
+      "display_name": "Alice",
+      "used_tokens": 120
+    }
+  ],
+  "generated_at": 1776250809
+}
+```
+
+外部调用示例：
+
+```bash
+curl 'http://103.231.13.190:47593/api/public-rankings/daily?token=你的随机token'
+```
+
+这层 token 是轻量保护，不是严格安全边界。它的作用是：
+
+- 避免别人只知道端口就直接拿到榜单
+- 给 Aily 这类外部平台一个稳定 URL
+
+如果后续要进一步收紧，可以再叠加：
+
+- nginx/basic auth
+- 来源 IP 限制
+- 独立签名校验
 
 ## 运行环境
 
@@ -152,6 +197,12 @@ ssh weex-cloudserver 'curl -s "http://127.0.0.1:47593/api/dashboard?preset=today
 curl -s 'http://103.231.13.190:47593/api/dashboard?preset=today' | sed -n '1,5p'
 ```
 
+公开榜单接口验证：
+
+```bash
+curl 'http://103.231.13.190:47593/api/public-rankings/daily?token=你的随机token' | sed -n '1,5p'
+```
+
 ## 更新部署流程
 
 后续更新建议继续沿用 rsync，不要直接在服务器上手改代码：
@@ -159,9 +210,11 @@ curl -s 'http://103.231.13.190:47593/api/dashboard?preset=today' | sed -n '1,5p'
 ```bash
 rsync -az --delete \
   --exclude '.git' \
+  --exclude '.env' \
   --exclude '.venv' \
   --exclude '.pytest_cache' \
   --exclude '__pycache__' \
+  --exclude 'teamview_aliases.json' \
   /Users/groove/Project/work/YunDrone/codex_logs/ \
   weex-cloudserver:~/apps/yundrone-codex-logs/
 ```
@@ -176,7 +229,7 @@ ssh weex-cloudserver '
 '
 ```
 
-如果 `.env` 或 `teamview_aliases.json` 在本地有更新，需要确认 rsync 没有把远端配置覆盖成错误值。
+如果 `.env` 或 `teamview_aliases.json` 在本地有更新，建议单独同步或手动编辑远端文件，不要混在常规代码 rsync 里。
 
 ## nginx 说明
 

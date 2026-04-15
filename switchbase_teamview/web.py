@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from pathlib import Path
 from typing import Any
@@ -27,10 +28,11 @@ class AliasUpdate(BaseModel):
     alias: str = ""
 
 
-def create_app(*, service: Any | None = None) -> FastAPI:
+def create_app(*, service: Any | None = None, public_token: str | None = None) -> FastAPI:
     load_project_env()
     app = FastAPI(title="TeamView Usage Board")
     app.state.dashboard_service = service or DashboardService.from_env()
+    app.state.public_token = public_token if public_token is not None else os.getenv("SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN", "")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -67,6 +69,13 @@ def create_app(*, service: Any | None = None) -> FastAPI:
     @app.get("/api/rankings")
     def rankings() -> dict[str, Any]:
         return _call_service(app.state.dashboard_service.get_rankings)
+
+    @app.get("/api/public-rankings/{ranking_type}")
+    def public_ranking(ranking_type: str, token: str = Query(default="")) -> dict[str, Any]:
+        expected = app.state.public_token
+        if not expected or not hmac.compare_digest(token, expected):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return _call_service(app.state.dashboard_service.get_public_ranking, ranking_type=ranking_type)
 
     @app.post("/api/aliases")
     def aliases(payload: AliasUpdate) -> dict[str, str]:

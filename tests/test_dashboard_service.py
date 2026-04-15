@@ -228,6 +228,54 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
     assert payload["monthly"][0]["used_tokens"] == 900
 
 
+def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    class FakeClient:
+        def get_usage(
+            self,
+            *,
+            username: str | None = None,
+            start_timestamp: int | None = None,
+            end_timestamp: int | None = None,
+        ) -> UsageResponse:
+            return _usage_response(
+                [
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@example.com",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 20,
+                        "used_tokens": 230,
+                        "user_group": "vip",
+                        "synced_at": 1776244478,
+                    }
+                ]
+            )
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: fixed_now,
+        ranking_ttl_seconds=60,
+    )
+
+    payload = service.get_public_ranking("weekly")
+
+    assert payload["ranking_type"] == "weekly"
+    assert payload["items"][0]["email"] == "alice@example.com"
+    assert payload["items"][0]["used_tokens"] == 230
+
+
 def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
     assert DashboardService is not None
