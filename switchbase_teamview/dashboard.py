@@ -17,6 +17,7 @@ from switchbase_teamview.exceptions import TeamViewError
 from switchbase_teamview.models import UsageMember, UsageResponse
 
 DEFAULT_TIMEZONE = "Asia/Shanghai"
+RANKING_TIMEZONE = "Asia/Shanghai"
 DEFAULT_ALIAS_FILE = "teamview_aliases.json"
 
 
@@ -61,6 +62,7 @@ class DashboardService:
         ranking_ttl_seconds: int = 60,
     ) -> None:
         self.timezone = ZoneInfo(timezone)
+        self.ranking_timezone = ZoneInfo(RANKING_TIMEZONE)
         self.now_provider = now_provider or (lambda: datetime.now(self.timezone))
         self.client_factory = client_factory or self._default_client_factory
         self.alias_store = alias_store or AliasStore(Path(DEFAULT_ALIAS_FILE))
@@ -108,9 +110,9 @@ class DashboardService:
             return self._ranking_cache[1]
 
         payload = {
-            "daily": self._ranking_for_window("today"),
-            "weekly": self._ranking_for_window("last_7_days"),
-            "monthly": self._ranking_for_window("last_30_days"),
+            "daily": self._ranking_for_window("daily"),
+            "weekly": self._ranking_for_window("weekly"),
+            "monthly": self._ranking_for_window("monthly"),
         }
         self._ranking_cache = (now + self.ranking_ttl_seconds, payload)
         return payload
@@ -149,10 +151,12 @@ class DashboardService:
             if callable(close):
                 close()
 
-    def _ranking_for_window(self, preset: str) -> list[dict[str, Any]]:
-        window = self._resolve_window(preset=preset)
+    def _ranking_for_window(self, ranking_type: str) -> list[dict[str, Any]]:
+        window = self._resolve_ranking_window(ranking_type)
         usage = self._fetch_usage(start_timestamp=window["start_timestamp"], end_timestamp=window["end_timestamp"])
-        return self._transform_members(usage.data.members)[:10]
+        ranked = self._transform_members(usage.data.members)
+        filtered = [item for item in ranked if self._is_ranking_member_allowed(item["email"])]
+        return filtered[:10]
 
     def _transform_members(self, members: list[UsageMember]) -> list[dict[str, Any]]:
         aliases = self.alias_store.load()
@@ -185,6 +189,29 @@ class DashboardService:
             or member.username.strip()
             or member.email.strip()
         )
+
+    @staticmethod
+    def _is_ranking_member_allowed(email: str) -> bool:
+        normalized = email.strip().lower()
+        return normalized.endswith("@yundrone.cn") and normalized != "codex@yundrone.cn"
+
+    def _resolve_ranking_window(self, ranking_type: str) -> dict[str, int | str]:
+        now = self.now_provider().astimezone(self.ranking_timezone)
+        if ranking_type == "daily":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif ranking_type == "weekly":
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            start = today_start - timedelta(days=now.weekday())
+        elif ranking_type == "monthly":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            raise TeamViewError(f"Unsupported ranking_type: {ranking_type}")
+
+        return {
+            "ranking_type": ranking_type,
+            "start_timestamp": int(start.timestamp()),
+            "end_timestamp": int(now.timestamp()),
+        }
 
     def _resolve_window(
         self,

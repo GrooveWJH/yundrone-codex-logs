@@ -106,62 +106,71 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
     assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
-    windows_seen: list[int] = []
+    windows_seen: list[tuple[int, int]] = []
+    daily_start = int(fixed_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    weekly_start = int(
+        (
+            fixed_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            - dashboard_module.timedelta(days=fixed_now.weekday())
+        ).timestamp()
+    )
+    monthly_start = int(fixed_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+    current_end = int(fixed_now.timestamp())
 
-    def usage_for_days(days: int) -> UsageResponse:
-        if days == 1:
+    def usage_for_window(start_timestamp: int) -> UsageResponse:
+        if start_timestamp == daily_start:
             members = [
-                {
-                    "newapi_user_id": 1,
-                    "username": "alice",
-                    "display_name": "Alice",
-                    "email": "alice@example.com",
-                    "role": "admin",
-                    "quota": 1000,
-                    "used_quota": 700,
-                    "request_count": 5,
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 5,
                     "used_tokens": 80,
                     "user_group": "vip",
                     "synced_at": 1776244478,
                 },
-                {
-                    "newapi_user_id": 2,
-                    "username": "bob",
-                    "display_name": "Bob",
-                    "email": "bob@example.com",
-                    "role": "member",
-                    "quota": 1000,
-                    "used_quota": 500,
-                    "request_count": 7,
+                    {
+                        "newapi_user_id": 2,
+                        "username": "bob",
+                        "display_name": "Bob",
+                        "email": "bob@yundrone.cn",
+                        "role": "member",
+                        "quota": 1000,
+                        "used_quota": 500,
+                        "request_count": 7,
                     "used_tokens": 110,
                     "user_group": "default",
                     "synced_at": 1776244478,
                 },
             ]
-        elif days == 7:
+        elif start_timestamp == weekly_start:
             members = [
-                {
-                    "newapi_user_id": 1,
-                    "username": "alice",
-                    "display_name": "Alice",
-                    "email": "alice@example.com",
-                    "role": "admin",
-                    "quota": 1000,
-                    "used_quota": 700,
-                    "request_count": 20,
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 20,
                     "used_tokens": 230,
                     "user_group": "vip",
                     "synced_at": 1776244478,
                 },
-                {
-                    "newapi_user_id": 2,
-                    "username": "bob",
-                    "display_name": "Bob",
-                    "email": "bob@example.com",
-                    "role": "member",
-                    "quota": 1000,
-                    "used_quota": 500,
-                    "request_count": 22,
+                    {
+                        "newapi_user_id": 2,
+                        "username": "bob",
+                        "display_name": "Bob",
+                        "email": "bob@yundrone.cn",
+                        "role": "member",
+                        "quota": 1000,
+                        "used_quota": 500,
+                        "request_count": 22,
                     "used_tokens": 420,
                     "user_group": "default",
                     "synced_at": 1776244478,
@@ -169,28 +178,28 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
             ]
         else:
             members = [
-                {
-                    "newapi_user_id": 1,
-                    "username": "alice",
-                    "display_name": "Alice",
-                    "email": "alice@example.com",
-                    "role": "admin",
-                    "quota": 1000,
-                    "used_quota": 700,
-                    "request_count": 60,
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 60,
                     "used_tokens": 900,
                     "user_group": "vip",
                     "synced_at": 1776244478,
                 },
-                {
-                    "newapi_user_id": 2,
-                    "username": "bob",
-                    "display_name": "Bob",
-                    "email": "bob@example.com",
-                    "role": "member",
-                    "quota": 1000,
-                    "used_quota": 500,
-                    "request_count": 50,
+                    {
+                        "newapi_user_id": 2,
+                        "username": "bob",
+                        "display_name": "Bob",
+                        "email": "bob@yundrone.cn",
+                        "role": "member",
+                        "quota": 1000,
+                        "used_quota": 500,
+                        "request_count": 50,
                     "used_tokens": 620,
                     "user_group": "default",
                     "synced_at": 1776244478,
@@ -208,9 +217,8 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
         ) -> UsageResponse:
             assert start_timestamp is not None
             assert end_timestamp is not None
-            days = max(1, round((end_timestamp - start_timestamp) / 86400))
-            windows_seen.append(days)
-            return usage_for_days(days)
+            windows_seen.append((start_timestamp, end_timestamp))
+            return usage_for_window(start_timestamp)
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
@@ -221,11 +229,130 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
 
     payload = service.get_rankings()
 
-    assert windows_seen == [1, 7, 30]
-    assert payload["daily"][0]["email"] == "bob@example.com"
-    assert payload["weekly"][0]["email"] == "bob@example.com"
-    assert payload["monthly"][0]["email"] == "alice@example.com"
+    assert windows_seen == [
+        (daily_start, current_end),
+        (weekly_start, current_end),
+        (monthly_start, current_end),
+    ]
+    assert payload["daily"][0]["email"] == "bob@yundrone.cn"
+    assert payload["weekly"][0]["email"] == "bob@yundrone.cn"
+    assert payload["monthly"][0]["email"] == "alice@yundrone.cn"
     assert payload["monthly"][0]["used_tokens"] == 900
+
+
+def test_dashboard_service_uses_natural_daily_weekly_monthly_ranking_windows(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    seen_calls: list[tuple[int | None, int | None]] = []
+
+    class FakeClient:
+        def get_usage(
+            self,
+            *,
+            username: str | None = None,
+            start_timestamp: int | None = None,
+            end_timestamp: int | None = None,
+        ) -> UsageResponse:
+            seen_calls.append((start_timestamp, end_timestamp))
+            return _usage_response(
+                [
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 20,
+                        "used_tokens": 230,
+                        "user_group": "vip",
+                        "synced_at": 1776244478,
+                    }
+                ]
+            )
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: fixed_now,
+        ranking_ttl_seconds=60,
+    )
+
+    service.get_rankings()
+
+    expected_daily_start = int(fixed_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    expected_weekly_start = int(
+        (
+            fixed_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            - dashboard_module.timedelta(days=fixed_now.weekday())
+        ).timestamp()
+    )
+    expected_monthly_start = int(fixed_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+    expected_end = int(fixed_now.timestamp())
+
+    assert seen_calls == [
+        (expected_daily_start, expected_end),
+        (expected_weekly_start, expected_end),
+        (expected_monthly_start, expected_end),
+    ]
+
+
+def test_dashboard_service_rankings_are_anchored_to_asia_shanghai_timezone(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    utc_now = datetime(2026, 4, 15, 2, 30, tzinfo=ZoneInfo("UTC"))
+    seen_calls: list[tuple[int | None, int | None]] = []
+
+    class FakeClient:
+        def get_usage(
+            self,
+            *,
+            username: str | None = None,
+            start_timestamp: int | None = None,
+            end_timestamp: int | None = None,
+        ) -> UsageResponse:
+            seen_calls.append((start_timestamp, end_timestamp))
+            return _usage_response(
+                [
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 20,
+                        "used_tokens": 230,
+                        "user_group": "vip",
+                        "synced_at": 1776244478,
+                    }
+                ]
+            )
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        timezone="UTC",
+        now_provider=lambda: utc_now,
+        ranking_ttl_seconds=60,
+    )
+
+    service.get_rankings()
+
+    asia_shanghai_now = utc_now.astimezone(ZoneInfo("Asia/Shanghai"))
+    expected_daily_start = int(asia_shanghai_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    expected_end = int(asia_shanghai_now.timestamp())
+
+    assert seen_calls[0] == (expected_daily_start, expected_end)
 
 
 def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) -> None:
@@ -250,7 +377,7 @@ def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) 
                         "newapi_user_id": 1,
                         "username": "alice",
                         "display_name": "Alice",
-                        "email": "alice@example.com",
+                        "email": "alice@yundrone.cn",
                         "role": "admin",
                         "quota": 1000,
                         "used_quota": 700,
@@ -272,8 +399,104 @@ def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) 
     payload = service.get_public_ranking("weekly")
 
     assert payload["ranking_type"] == "weekly"
-    assert payload["items"][0]["email"] == "alice@example.com"
+    assert payload["items"][0]["email"] == "alice@yundrone.cn"
     assert payload["items"][0]["used_tokens"] == 230
+
+
+def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_codex(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    members = [
+        {
+            "newapi_user_id": 1,
+            "username": "alice",
+            "display_name": "Alice",
+            "email": "alice@yundrone.cn",
+            "role": "admin",
+            "quota": 1000,
+            "used_quota": 700,
+            "request_count": 20,
+            "used_tokens": 230,
+            "user_group": "vip",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 2,
+            "username": "codex",
+            "display_name": "Codex",
+            "email": "codex@yundrone.cn",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 900,
+            "request_count": 30,
+            "used_tokens": 900,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 3,
+            "username": "bob",
+            "display_name": "Bob",
+            "email": "bob@example.com",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 500,
+            "request_count": 25,
+            "used_tokens": 500,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 4,
+            "username": "carol",
+            "display_name": "Carol",
+            "email": "carol@yundrone.cn",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 400,
+            "request_count": 10,
+            "used_tokens": 120,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+    ]
+
+    class FakeClient:
+        def get_usage(
+            self,
+            *,
+            username: str | None = None,
+            start_timestamp: int | None = None,
+            end_timestamp: int | None = None,
+        ) -> UsageResponse:
+            return _usage_response(members)
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: fixed_now,
+        ranking_ttl_seconds=60,
+    )
+
+    payload = service.get_rankings()
+
+    assert [item["email"] for item in payload["daily"]] == [
+        "alice@yundrone.cn",
+        "carol@yundrone.cn",
+    ]
+    assert [item["email"] for item in payload["weekly"]] == [
+        "alice@yundrone.cn",
+        "carol@yundrone.cn",
+    ]
+    assert [item["email"] for item in payload["monthly"]] == [
+        "alice@yundrone.cn",
+        "carol@yundrone.cn",
+    ]
 
 
 def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) -> None:
