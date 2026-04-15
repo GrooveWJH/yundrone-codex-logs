@@ -1,0 +1,12 @@
+.env
+.python-version
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+teamview_aliases.json
+
+.DS_Store
