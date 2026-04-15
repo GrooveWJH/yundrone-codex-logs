@@ -61,6 +61,12 @@ GET /api/public-rankings/weekly?token=...
 GET /api/public-rankings/monthly?token=...
 ```
 
+统计口径：
+
+- `daily`：Asia/Shanghai 当日 `00:00` 到当前时间
+- `weekly`：Asia/Shanghai 本周一 `00:00` 到当前时间
+- `monthly`：Asia/Shanghai 本月 1 日 `00:00` 到当前时间
+
 返回结构示例：
 
 ```json
@@ -203,6 +209,24 @@ curl -s 'http://103.231.13.190:47593/api/dashboard?preset=today' | sed -n '1,5p'
 curl 'http://103.231.13.190:47593/api/public-rankings/daily?token=你的随机token' | sed -n '1,5p'
 ```
 
+海报生成脚本验证：
+
+```bash
+cd ~/apps/yundrone-codex-logs
+.venv/bin/python -m scripts.poster \
+  --input-source api \
+  --period daily \
+  --base-url http://127.0.0.1:47593/api/public-rankings \
+  --json-dir ./tmp
+```
+
+说明：
+
+- poster CLI 会自动读取部署目录根下的 `.env`
+- 因此只要 `.env` 内已有 `SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN`，通常不必手传 `--token`
+- 若未传 `--output`，默认输出到 `./outputs/daily-poster.png`
+- 运行时会打印 `[poster] ...` 调试日志，适合 Agent / 自动化任务排障
+
 ## 更新部署流程
 
 后续更新建议继续沿用 rsync，不要直接在服务器上手改代码：
@@ -226,6 +250,30 @@ ssh weex-cloudserver '
   cd ~/apps/yundrone-codex-logs &&
   .venv/bin/pip install . &&
   sudo systemctl restart yundrone-codex-logs.service
+'
+```
+
+如需在服务器上生成海报，直接运行：
+
+```bash
+ssh weex-cloudserver '
+  cd ~/apps/yundrone-codex-logs &&
+  .venv/bin/python -m scripts.poster \
+    --input-source api \
+    --period all \
+    --base-url http://127.0.0.1:47593/api/public-rankings \
+    --json-dir ./tmp
+'
+```
+
+如果需要指定输出文件，仍可显式传：
+
+```bash
+ssh weex-cloudserver '
+  cd ~/apps/yundrone-codex-logs &&
+  .venv/bin/python -m scripts.poster \
+    --period daily \
+    --output ./outputs/custom-daily.png
 '
 ```
 
