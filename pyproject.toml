@@ -8,8 +8,10 @@ dependencies = [
     "fastapi>=0.115.12",
     "httpx>=0.28.1",
     "jinja2>=3.1.6",
+    "matplot>=0.1.9",
     "pydantic>=2.11.0",
     "python-dotenv>=1.1.0",
+    "typer>=0.16.0",
     "uvicorn>=0.34.2",
 ]
 
@@ -31,6 +33,7 @@ packages = ["switchbase_teamview"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    ".codex/check-maxline.json",
     "switchbase_teamview/**/*.py",
     "switchbase_teamview/**/*.html",
     "switchbase_teamview/**/*.css",
