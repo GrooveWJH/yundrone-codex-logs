@@ -1,0 +1,9 @@
+{
+  "max_lines": 300,
+  "include_exts": [
+    "py"
+  ],
+  "exclude_files": [
+    "tests/test_dashboard_service.py"
+  ]
+}
