@@ -11,11 +11,11 @@ def apply_policy(items: list[RankingItem], policy: DataPolicy) -> list[RankingIt
 
 
 def snapshot_scope(policy: DataPolicy) -> str:
-    return "all" if policy.include_all_members else "filtered"
+    return policy.scope
 
 
 def _item_allowed(item: RankingItem, policy: DataPolicy) -> bool:
-    if policy.include_all_members:
+    if policy.scope == "all-members":
         return True
 
     email = item.email.strip().lower()

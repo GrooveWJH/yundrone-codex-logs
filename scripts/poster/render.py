@@ -38,7 +38,7 @@ def build_figure(request: PosterRequest) -> Figure:
     config = request.config
     plt.rcParams["font.sans-serif"] = fonts.FONT_FALLBACKS
     plt.rcParams["axes.unicode_minus"] = False
-    font_paths = fonts.resolve_noto_font_paths(
+    font_paths = fonts.prime_font_cache(
         font_dir=config.font_dir,
         cache_dir=config.font_cache_dir,
         font_url=config.font_url,
@@ -200,23 +200,58 @@ def _draw_rank_panel(axis: Axes, snapshot: RankingSnapshot, config: PosterConfig
     axis.set_axisbelow(True)
     for spine in axis.spines.values():
         spine.set_visible(False)
-    _draw_labels(axis, snapshot.items, chart_layout)
+    _draw_labels(axis, snapshot.items, chart_layout, font_set)
 
 
-def _draw_labels(axis: Axes, items: list[RankingItem], chart_layout: layout.ChartLayout) -> None:
+def _draw_labels(
+    axis: Axes,
+    items: list[RankingItem],
+    chart_layout: layout.ChartLayout,
+    font_set: dict[str, object],
+) -> None:
     for index, (y_pos, item) in enumerate(zip(range(len(items)), items), start=1):
         label_y = y_pos - 0.46
-        axis.text(-chart_layout.max_value * 0.005, label_y, f"#{index}", ha="right", va="center", color=RANK_COLORS[index - 1], fontsize=11, fontweight="light")
-        axis.text(chart_layout.max_value * 0.012, label_y, item.display_name, ha="left", va="center", color=TEXT_PRIMARY, fontsize=13)
-        axis.text(item.used_tokens * chart_layout.bar_scale + chart_layout.label_gap_data, y_pos, layout.compact_tokens(item.used_tokens), ha="left", va="center", color=TEXT_SECONDARY, fontsize=11)
+        axis.text(
+            -chart_layout.max_value * 0.005,
+            label_y,
+            f"#{index}",
+            ha="right",
+            va="center",
+            color=_rank_color(index),
+            fontproperties=font_set["rank"],
+        )
+        axis.text(
+            chart_layout.max_value * 0.012,
+            label_y,
+            item.display_name,
+            ha="left",
+            va="center",
+            color=TEXT_PRIMARY,
+            fontproperties=font_set["name"],
+        )
+        axis.text(
+            item.used_tokens * chart_layout.bar_scale + chart_layout.label_gap_data,
+            y_pos,
+            layout.compact_tokens(item.used_tokens),
+            ha="left",
+            va="center",
+            color=TEXT_SECONDARY,
+            fontproperties=font_set["value"],
+        )
+
+
+def _rank_color(index: int) -> str:
+    return RANK_COLORS[min(index - 1, len(RANK_COLORS) - 1)]
 
 
 def _font_set(config: PosterConfig, font_paths: dict[str, object]) -> dict[str, object]:
     return {
-        "header_title": fonts.font_properties(path=font_paths.get("medium") or font_paths.get("bold"), size=config.header_title_font_size, weight="light"),
-        "period_title": fonts.font_properties(path=font_paths.get("bold"), size=config.period_badge_font_size, weight="bold"),
-        "subtitle": fonts.font_properties(path=font_paths.get("light"), size=config.subtitle_font_size, weight="light"),
-        "name": fonts.font_properties(path=font_paths.get("regular"), size=config.name_font_size, weight="regular"),
+        "header_title": fonts.font_properties(path=font_paths.get("bold"), size=config.header_title_font_size),
+        "period_title": fonts.font_properties(path=font_paths.get("bold"), size=config.period_badge_font_size),
+        "subtitle": fonts.font_properties(path=font_paths.get("light"), size=config.subtitle_font_size),
+        "rank": fonts.font_properties(path=font_paths.get("regular"), size=config.rank_font_size),
+        "name": fonts.font_properties(path=font_paths.get("medium"), size=config.name_font_size),
+        "value": fonts.font_properties(path=font_paths.get("regular"), size=config.value_font_size),
     }
 
 

@@ -403,6 +403,92 @@ def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) 
     assert payload["items"][0]["used_tokens"] == 230
 
 
+def test_dashboard_service_returns_explicit_window_ranking_payload(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    fixed_now = datetime(2026, 4, 16, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    seen_calls: list[tuple[int | None, int | None]] = []
+    start_timestamp = int(datetime(2026, 4, 15, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    end_timestamp = int(datetime(2026, 4, 15, 23, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+
+    class FakeClient:
+        def get_usage(
+            self,
+            *,
+            username: str | None = None,
+            start_timestamp: int | None = None,
+            end_timestamp: int | None = None,
+        ) -> UsageResponse:
+            del username
+            seen_calls.append((start_timestamp, end_timestamp))
+            return _usage_response(
+                [
+                    {
+                        "newapi_user_id": 1,
+                        "username": "alice",
+                        "display_name": "Alice",
+                        "email": "alice@yundrone.cn",
+                        "role": "admin",
+                        "quota": 1000,
+                        "used_quota": 700,
+                        "request_count": 20,
+                        "used_tokens": 230,
+                        "user_group": "vip",
+                        "synced_at": 1776244478,
+                    }
+                ]
+            )
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: fixed_now,
+        ranking_ttl_seconds=60,
+    )
+
+    payload = service.get_windowed_ranking(
+        ranking_type="daily",
+        start_timestamp=start_timestamp,
+        end_timestamp=end_timestamp,
+    )
+
+    assert seen_calls == [(start_timestamp, end_timestamp)]
+    assert payload["scope"] == "filtered"
+    assert payload["ranking_type"] == "daily"
+    assert payload["generated_at"] == end_timestamp
+    assert payload["items"][0]["email"] == "alice@yundrone.cn"
+
+
+def test_dashboard_service_returns_empty_window_payload_without_fetching(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    class FakeClient:
+        def get_usage(self, **kwargs) -> UsageResponse:  # pragma: no cover - should not be called
+            raise AssertionError(f"unexpected usage fetch: {kwargs}")
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: datetime(2026, 4, 14, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        ranking_ttl_seconds=60,
+    )
+
+    boundary = int(datetime(2026, 4, 14, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    payload = service.get_windowed_ranking(
+        ranking_type="weekly",
+        start_timestamp=boundary,
+        end_timestamp=boundary,
+    )
+
+    assert payload == {"scope": "filtered", "ranking_type": "weekly", "items": [], "generated_at": boundary}
+
+
 def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_codex(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
     AliasStore = getattr(dashboard_module, "AliasStore", None)
@@ -497,6 +583,93 @@ def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_cod
         "alice@yundrone.cn",
         "carol@yundrone.cn",
     ]
+
+
+def test_dashboard_service_build_ranking_supports_filtered_and_all_members_scopes(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    AliasStore = getattr(dashboard_module, "AliasStore", None)
+    assert DashboardService is not None
+    assert AliasStore is not None
+
+    start_timestamp = int(datetime(2026, 4, 15, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    end_timestamp = int(datetime(2026, 4, 15, 23, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    members = [
+        {
+            "newapi_user_id": 1,
+            "username": "alice",
+            "display_name": "Alice",
+            "email": "alice@yundrone.cn",
+            "role": "admin",
+            "quota": 1000,
+            "used_quota": 700,
+            "request_count": 20,
+            "used_tokens": 230,
+            "user_group": "vip",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 2,
+            "username": "codex",
+            "display_name": "Codex",
+            "email": "codex@yundrone.cn",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 900,
+            "request_count": 30,
+            "used_tokens": 900,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 3,
+            "username": "bob",
+            "display_name": "Bob",
+            "email": "bob@example.com",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 500,
+            "request_count": 25,
+            "used_tokens": 500,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+    ]
+
+    class FakeClient:
+        def get_usage(self, **kwargs) -> UsageResponse:
+            del kwargs
+            return _usage_response(members)
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        alias_store=AliasStore(tmp_path / "aliases.json"),
+        now_provider=lambda: datetime(2026, 4, 16, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        ranking_ttl_seconds=60,
+    )
+
+    filtered = service.build_ranking(
+        scope="filtered",
+        ranking_type="daily",
+        start_timestamp=start_timestamp,
+        end_timestamp=end_timestamp,
+        limit=10,
+    )
+    all_members = service.build_ranking(
+        scope="all-members",
+        ranking_type="daily",
+        start_timestamp=start_timestamp,
+        end_timestamp=end_timestamp,
+        limit=10,
+    )
+
+    assert [item["email"] for item in filtered["items"]] == ["alice@yundrone.cn"]
+    assert [item["email"] for item in all_members["items"]] == [
+        "codex@yundrone.cn",
+        "bob@example.com",
+        "alice@yundrone.cn",
+    ]
+    assert filtered["scope"] == "filtered"
+    assert all_members["scope"] == "all-members"
 
 
 def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) -> None:

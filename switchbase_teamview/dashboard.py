@@ -15,6 +15,7 @@ from switchbase_teamview.client import TeamViewClient
 from switchbase_teamview.env import load_project_env
 from switchbase_teamview.exceptions import TeamViewError
 from switchbase_teamview.models import UsageMember, UsageResponse
+from switchbase_teamview.rankings import RankingScope, apply_ranking_scope, resolve_ranking_window, validate_ranking_scope
 
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 RANKING_TIMEZONE = "Asia/Shanghai"
@@ -118,14 +119,66 @@ class DashboardService:
         return payload
 
     def get_public_ranking(self, ranking_type: str) -> dict[str, Any]:
-        rankings = self.get_rankings()
-        if ranking_type not in rankings:
+        return self.build_natural_ranking(scope="filtered", ranking_type=ranking_type, limit=10)
+
+    def build_natural_ranking(
+        self,
+        *,
+        scope: RankingScope,
+        ranking_type: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        window = self._resolve_ranking_window(ranking_type)
+        return self.build_ranking(
+            scope=scope,
+            ranking_type=ranking_type,
+            start_timestamp=int(window["start_timestamp"]),
+            end_timestamp=int(window["end_timestamp"]),
+            limit=limit,
+        )
+
+    def build_ranking(
+        self,
+        *,
+        scope: RankingScope,
+        ranking_type: str,
+        start_timestamp: int,
+        end_timestamp: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        validate_ranking_scope(scope)
+        if ranking_type not in {"daily", "weekly", "monthly"}:
             raise TeamViewError(f"Unsupported ranking_type: {ranking_type}")
+        if start_timestamp > end_timestamp:
+            raise TeamViewError("start_timestamp must be less than or equal to end_timestamp")
+        if start_timestamp == end_timestamp:
+            return {"scope": scope, "ranking_type": ranking_type, "items": [], "generated_at": end_timestamp}
+        usage = self._fetch_usage(start_timestamp=start_timestamp, end_timestamp=end_timestamp)
+        ranked = self._transform_members(usage.data.members)
+        scoped_items = apply_ranking_scope(ranked, scope)
         return {
+            "scope": scope,
             "ranking_type": ranking_type,
-            "items": rankings[ranking_type],
-            "generated_at": int(self.now_provider().astimezone(self.timezone).timestamp()),
+            "items": scoped_items[:limit],
+            "generated_at": end_timestamp,
         }
+
+    def get_windowed_ranking(
+        self,
+        *,
+        ranking_type: str,
+        start_timestamp: int,
+        end_timestamp: int,
+        scope: RankingScope = "filtered",
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        return self.build_ranking(
+            scope=scope,
+            ranking_type=ranking_type,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            limit=limit,
+        )
 
     def set_alias(self, *, email: str, alias: str) -> dict[str, str]:
         normalized_email = email.strip()
@@ -153,10 +206,13 @@ class DashboardService:
 
     def _ranking_for_window(self, ranking_type: str) -> list[dict[str, Any]]:
         window = self._resolve_ranking_window(ranking_type)
-        usage = self._fetch_usage(start_timestamp=window["start_timestamp"], end_timestamp=window["end_timestamp"])
-        ranked = self._transform_members(usage.data.members)
-        filtered = [item for item in ranked if self._is_ranking_member_allowed(item["email"])]
-        return filtered[:10]
+        return self.build_ranking(
+            scope="filtered",
+            ranking_type=ranking_type,
+            start_timestamp=int(window["start_timestamp"]),
+            end_timestamp=int(window["end_timestamp"]),
+            limit=10,
+        )["items"]
 
     def _transform_members(self, members: list[UsageMember]) -> list[dict[str, Any]]:
         aliases = self.alias_store.load()
@@ -183,35 +239,10 @@ class DashboardService:
 
     @staticmethod
     def _display_name(member: UsageMember, aliases: dict[str, str]) -> str:
-        return (
-            aliases.get(member.email, "").strip()
-            or member.display_name.strip()
-            or member.username.strip()
-            or member.email.strip()
-        )
-
-    @staticmethod
-    def _is_ranking_member_allowed(email: str) -> bool:
-        normalized = email.strip().lower()
-        return normalized.endswith("@yundrone.cn") and normalized != "codex@yundrone.cn"
+        return aliases.get(member.email, "").strip() or member.display_name.strip() or member.username.strip() or member.email.strip()
 
     def _resolve_ranking_window(self, ranking_type: str) -> dict[str, int | str]:
-        now = self.now_provider().astimezone(self.ranking_timezone)
-        if ranking_type == "daily":
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif ranking_type == "weekly":
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            start = today_start - timedelta(days=now.weekday())
-        elif ranking_type == "monthly":
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:
-            raise TeamViewError(f"Unsupported ranking_type: {ranking_type}")
-
-        return {
-            "ranking_type": ranking_type,
-            "start_timestamp": int(start.timestamp()),
-            "end_timestamp": int(now.timestamp()),
-        }
+        return resolve_ranking_window(ranking_type=ranking_type, now=self.now_provider().astimezone(self.ranking_timezone))
 
     def _resolve_window(
         self,

@@ -5,19 +5,20 @@ description = "Python client and CLI for TeamView management APIs"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.12",
     "httpx>=0.28.1",
-    "jinja2>=3.1.6",
+    "lark-oapi>=1.5.3",
     "matplot>=0.1.9",
     "pydantic>=2.11.0",
     "python-dotenv>=1.1.0",
+    "python-socks>=2.8.1",
     "typer>=0.16.0",
-    "uvicorn>=0.34.2",
 ]
 
 [project.scripts]
 teamview-cli = "switchbase_teamview.cli:run"
-teamview-web = "switchbase_teamview.web:main"
+teamview-api = "switchbase_teamview.api:main"
+teamview-report-daemon = "switchbase_teamview.report_daemon:main"
+teamview-feishu-bot = "switchbase_teamview.feishu_bot_main:main"
 
 [dependency-groups]
 dev = [
@@ -29,15 +30,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["switchbase_teamview"]
+packages = ["switchbase_teamview", "scripts"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     ".codex/check-maxline.json",
     "switchbase_teamview/**/*.py",
-    "switchbase_teamview/**/*.html",
-    "switchbase_teamview/**/*.css",
-    "switchbase_teamview/**/*.js",
     "scripts/**/*.py",
     "tests/**/*.py",
     ".env.template",

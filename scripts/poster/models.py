@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 Period = Literal["daily", "weekly", "monthly"]
-InputSource = Literal["api", "json", "memory-test-hook"]
+InputSource = Literal["api", "json", "memory-test-hook", "teamview"]
+RankingScope = Literal["filtered", "all-members"]
 SortKey = Literal["used_tokens_desc"]
 DisplayNameStrategy = Literal["display_name_first"]
 
@@ -30,12 +31,12 @@ class RankingSnapshot(PosterModel):
     period: Period
     generated_at: int
     source: str
-    scope: str
+    scope: RankingScope
     items: list[RankingItem]
 
 
 class DataPolicy(PosterModel):
-    include_all_members: bool = False
+    scope: RankingScope = "filtered"
     allowed_email_domains: list[str] = Field(default_factory=lambda: ["yundrone.cn"])
     excluded_emails: list[str] = Field(default_factory=lambda: ["codex@yundrone.cn"])
     top_n: int = 5
