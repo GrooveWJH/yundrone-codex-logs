@@ -119,7 +119,63 @@ def test_feishu_report_cache_defaults_to_all_members_scope(tmp_path: Path, monke
     assert seen == {
         "output_dir": tmp_path / "feishu-cache",
         "scope": "all-members",
-        "limit": 7,
+        "limit": 10,
         "policy_scope": "all-members",
-        "policy_top_n": 7,
+        "policy_top_n": 10,
     }
+
+
+def test_feishu_report_cache_builds_and_reuses_overview_per_minute(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[str, int, int, int]] = []
+
+    class FakeService:
+        def build_ranking(
+            self,
+            *,
+            scope: str,
+            ranking_type: str,
+            start_timestamp: int,
+            end_timestamp: int,
+            limit: int,
+        ) -> dict[str, object]:
+            calls.append((ranking_type, start_timestamp, end_timestamp, limit))
+            return {
+                "scope": scope,
+                "ranking_type": ranking_type,
+                "generated_at": end_timestamp,
+                "items": [
+                    {
+                        "email": "alice@example.com",
+                        "display_name": "Alice",
+                        "used_tokens": 123,
+                        "request_count": 1,
+                    }
+                ],
+            }
+
+    class FakeGenerator:
+        def __init__(self) -> None:
+            self.service = FakeService()
+
+    def fake_save_png(figure, output_path: Path, *, dpi: int = 250, facecolor: str = "#f5f6fa") -> Path:
+        del figure, dpi, facecolor
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"png")
+        return output_path
+
+    monkeypatch.setattr("switchbase_teamview.feishu_reports.build_figure", lambda request: object())
+    monkeypatch.setattr("switchbase_teamview.feishu_reports.export.save_png", fake_save_png)
+
+    cache = FeishuReportCache(
+        report_generator=FakeGenerator(),
+        cache_dir=tmp_path / "feishu-cache",
+        now_provider=lambda: datetime(2026, 4, 16, 12, 23, 12, tzinfo=_TZ),
+    )
+
+    first = cache.resolve_overview()
+    second = cache.resolve_overview()
+
+    assert first.poster_path == second.poster_path
+    assert first.from_cache is False
+    assert second.from_cache is True
+    assert [call[0] for call in calls] == ["daily", "weekly", "monthly"]

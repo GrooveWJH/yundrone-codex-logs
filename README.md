@@ -1,25 +1,27 @@
 # yundrone-codex-logs
 
-YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决三件事：
+YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决四件事：
 
 - 拉取 TeamView `usage` / `logs` 数据
 - 生成排行榜 JSON 与海报 PNG
 - 运行飞书长连接机器人，响应 `日报` / `周报` / `月报`
+- 运行飞书定时通报服务，向研发部群定时发送每日总览图
 
-当前线上正式运行形态已经收口为：`weex-cloudserver` 只保留飞书机器人服务，不再对外提供 HTTP API，也不再常驻运行榜单守护进程。
+当前线上正式运行形态已经收口为：`weex-cloudserver` 只保留两个飞书服务，不再对外提供 HTTP API，也不再常驻运行榜单守护进程。
 
 ## 当前生产状态
 
 截至现在，服务器 `weex-cloudserver` 的实际状态是：
 
 - `yundrone-codex-feishu-bot.service`: `active` + `enabled`
+- `yundrone-codex-feishu-group-reporter.service`: `active` + `enabled`
 - `yundrone-codex-logs.service`: `inactive` + `disabled`
 - `yundrone-codex-report-daemon.service`: `inactive` + `disabled`
 - `47593` 端口当前没有监听
 
 这意味着：
 
-- 生产环境只有飞书机器人在工作
+- 生产环境通过两个飞书服务工作：长连接即时回复 + 每日 09:30 定时群通报
 - 当前没有公网 HTTP 接口可供拉取 JSON 或 PNG
 - `scripts/fetch_server_reports.py` 只适用于你另行启用 API 服务的环境，不适用于当前生产服务器
 
@@ -79,6 +81,7 @@ SWITCHBASE_TEAMVIEW_TIMEZONE=Asia/Shanghai
 FEISHU_APP_ID=cli_your_app_id_here
 FEISHU_APP_SECRET=your_feishu_app_secret_here
 FEISHU_LOG_LEVEL=INFO
+FEISHU_REPORT_CHAT_ID=oc_your_group_chat_id_here
 ```
 
 可选变量：
@@ -184,12 +187,15 @@ uv run python scripts/run_feishu_bot.py
 
 - 使用飞书官方 `lark-oapi` 长连接，不需要公网回调 URL
 - 订阅 `im.message.receive_v1`
-- 支持群聊 `@机器人 日报|周报|月报`
-- 支持单聊直接发 `日报|周报|月报`
+- 支持群聊 `@机器人 日报|周报|月报|总览`
+- 支持单聊直接发 `日报|周报|月报|总览`
+- 如果只是 `@机器人` 或发送内容只有空格，会直接返回总览图
+- 如果发送内容不是精确命令，会回复使用方法
+- 即时交互会给原消息添加状态表情：处理中 `Alarm`，成功 `DONE`，非法输入 `THINKING`，处理失败 `SWEAT`
 - 收到消息后按当前分钟即时生成榜单
 - 统计窗口固定使用 `Asia/Shanghai`
 - 回复使用 `all-members` scope
-- 当前固定返回 Top 7
+- 当前固定返回 Top 10；如果总人数不足 10，则显示全部成员
 - 同一分钟复用缓存，跨分钟自动失效
 - 命中邮箱别名后会展示别名
 
@@ -198,6 +204,7 @@ uv run python scripts/run_feishu_bot.py
 - `日报`: 当天 `00:00` 到当前分钟
 - `周报`: 本周一 `00:00` 到当前分钟
 - `月报`: 本月 1 日 `00:00` 到当前分钟
+- `总览`: 同时返回上述三种窗口的三合一图，均截止到当前分钟
 
 缓存目录：
 
@@ -216,6 +223,7 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 - 同一条飞书消息在处理进行中重投时，只会处理一次
 - 只有“成功发图”后才会写入成功去重状态
 - 如果生成失败或上传失败，平台重投同一 `message_id` 时会再次尝试
+- 非法输入的使用方法提示会记为成功回复
 
 日志里可以看到这些结果：
 
@@ -242,6 +250,47 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 
 它们不适合拿来描述当前 `weex-cloudserver` 的线上状态，因为现在那台服务器已经停掉了这两类服务。
 
+### 5. 飞书定时通报
+
+仓库还提供一个独立的飞书定时通报服务：
+
+```bash
+uv run teamview-feishu-group-reporter
+```
+
+或者：
+
+```bash
+uv run python scripts/run_feishu_group_reporter.py
+```
+
+当前固定行为：
+
+- 时区：`Asia/Shanghai`
+- 目标群：由 `FEISHU_REPORT_CHAT_ID` 指定
+- 口径：`all-members`
+- 展示人数：`min(总人数, 10)`
+- 名称来源：`teamview_aliases.json`
+
+发送规则：
+
+- 每天只在 `09:30` 发送一条飞书 `post` 消息
+- 消息内容为“文字 + 一张三合一总览图”
+- 日统计：昨天 `00:00 -> 今天 00:00`
+- 周统计：
+  - 普通日期：本周一 `00:00 -> 今日 09:30`
+  - 周一：上周一 `00:00 -> 本周一 00:00`，文字里标记 `<上周总览>`
+- 月统计：
+  - 普通日期：本月 1 日 `00:00 -> 今日 09:30`
+  - 每月 1 日：上月 1 日 `00:00 -> 本月 1 日 00:00`，文字里标记 `<上月总览>`
+
+实现说明：
+
+- 这是独立 systemd 服务，不和长连接 bot 混在一起
+- 服务会把定时总览图写到 `outputs/scheduled-feishu/`
+- 只有命中 `09:30` 这个分钟窗口才会发送，服务在其他时间重启不会补发
+- 同一天的 `09:30` 槽位只会成功发送一次，避免服务重启后重复通报
+
 ## 字体说明
 
 仓库内置 `assets/NotoSansSC/*.otf`，当前渲染逻辑会按用途选不同字重：
@@ -259,9 +308,10 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 
 ## 当前生产部署约定
 
-生产服务器当前只保留一个 systemd 服务：
+生产服务器当前保留两个 systemd 服务：
 
 - `yundrone-codex-feishu-bot.service`
+- `yundrone-codex-feishu-group-reporter.service`
 
 它使用的入口是：
 
@@ -297,4 +347,3 @@ python3 /Users/groove/.codex/skills/check-maxline/scripts/check_maxline.py --roo
 - 部署与运维: [docs/deploy-weex-cloudserver.md](docs/deploy-weex-cloudserver.md)
 - 本地字体资源: `assets/NotoSansSC/`
 - 飞书 systemd unit 模板: `deploy/systemd/yundrone-codex-feishu-bot.service`
-

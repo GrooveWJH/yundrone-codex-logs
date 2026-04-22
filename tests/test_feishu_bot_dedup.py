@@ -30,10 +30,19 @@ def test_retries_same_message_id_after_image_send_failure(tmp_path: Path) -> Non
         def send_text_by_chat_id(self, *, chat_id: str, text: str) -> None:
             raise AssertionError((chat_id, text))
 
+        def add_message_reaction(self, *, message_id: str, emoji_type: str) -> str:
+            return "reaction_alarm"
+
+        def delete_message_reaction(self, *, message_id: str, reaction_id: str) -> None:
+            return None
+
     class FakeCache:
         def resolve(self, *, period: str):
             resolves.append(period)
             return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
+
+        def resolve_overview(self):  # pragma: no cover - defensive path
+            raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
     event = message_event(text="月报", message_id="om_retry_after_send_failure")
@@ -57,6 +66,12 @@ def test_retries_same_message_id_after_generate_failure(tmp_path: Path) -> None:
         def send_text_by_chat_id(self, *, chat_id: str, text: str) -> None:
             sent.append((chat_id, Path(text)))
 
+        def add_message_reaction(self, *, message_id: str, emoji_type: str) -> str:
+            return "reaction_alarm"
+
+        def delete_message_reaction(self, *, message_id: str, reaction_id: str) -> None:
+            return None
+
     class FakeCache:
         def resolve(self, *, period: str):
             resolves.append(period)
@@ -64,6 +79,9 @@ def test_retries_same_message_id_after_generate_failure(tmp_path: Path) -> None:
             if attempts["count"] == 1:
                 raise RuntimeError("generate failed")
             return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
+
+        def resolve_overview(self):  # pragma: no cover - defensive path
+            raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
     event = message_event(text="周报", message_id="om_retry_after_generate_failure")
@@ -85,9 +103,18 @@ def test_fallback_text_failure_does_not_mark_success(tmp_path: Path) -> None:
             attempts["count"] += 1
             raise RuntimeError((chat_id, text))
 
+        def add_message_reaction(self, *, message_id: str, emoji_type: str) -> str:
+            return "reaction_alarm"
+
+        def delete_message_reaction(self, *, message_id: str, reaction_id: str) -> None:
+            return None
+
     class FakeCache:
         def resolve(self, *, period: str):
             raise FileNotFoundError(period)
+
+        def resolve_overview(self):  # pragma: no cover - defensive path
+            raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
     event = message_event(text="周报", message_id="om_fallback_failure")
@@ -107,9 +134,18 @@ def test_short_circuits_when_message_is_inflight(tmp_path: Path) -> None:
         def send_text_by_chat_id(self, *, chat_id: str, text: str) -> None:
             raise AssertionError((chat_id, text))
 
+        def add_message_reaction(self, *, message_id: str, emoji_type: str) -> str:
+            raise AssertionError((message_id, emoji_type))
+
+        def delete_message_reaction(self, *, message_id: str, reaction_id: str) -> None:
+            raise AssertionError((message_id, reaction_id))
+
     class FakeCache:
         def resolve(self, *, period: str):
             resolves.append(period)
+
+        def resolve_overview(self):  # pragma: no cover - defensive path
+            raise AssertionError("unexpected overview")
 
     service = FeishuBotService(
         feishu_client=FakeFeishuClient(),

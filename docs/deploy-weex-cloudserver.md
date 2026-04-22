@@ -1,6 +1,6 @@
 # weex-cloudserver 部署文档
 
-本文只描述当前真实在线方案：`weex-cloudserver` 只运行飞书机器人，不提供公网 HTTP API，不运行榜单守护进程。
+本文只描述当前真实在线方案：`weex-cloudserver` 运行两个飞书相关服务，不提供公网 HTTP API，不运行榜单守护进程。
 
 ## 当前线上状态
 
@@ -10,17 +10,19 @@
 - 主机：`103.231.13.190`
 - 部署目录：`/home/groove/apps/yundrone-codex-logs`
 - 当前启用服务：`yundrone-codex-feishu-bot.service`
+- 当前启用服务：`yundrone-codex-feishu-group-reporter.service`
 
 当前已核实状态：
 
 - `yundrone-codex-feishu-bot.service`: `active` + `enabled`
+- `yundrone-codex-feishu-group-reporter.service`: `active` + `enabled`
 - `yundrone-codex-logs.service`: `inactive` + `disabled`
 - `yundrone-codex-report-daemon.service`: `inactive` + `disabled`
 - `ss -ltnp | grep 47593`: 无输出
 
 这意味着：
 
-- 线上只有飞书机器人
+- 线上通过两个飞书服务工作：长连接即时回复 + 每日 09:30 定时群通报
 - 当前没有任何公开 HTTP 接口
 - nginx 不参与这套链路，也不需要改 nginx
 
@@ -30,11 +32,14 @@
 
 - 使用飞书官方 `lark-oapi` SDK 建立长连接
 - 订阅 `im.message.receive_v1`
-- 处理群聊 `@机器人 日报|周报|月报`
-- 处理单聊 `日报|周报|月报`
+- 处理群聊 `@机器人 日报|周报|月报|总览`
+- 处理单聊 `日报|周报|月报|总览`
+- 如果只是 `@机器人` 或内容仅为空白，直接返回三合一总览图
+- 如果输入不属于精确命令，回复使用方法文本
+- 即时交互会对用户原消息添加状态表情：处理中 `Alarm`，成功 `DONE`，非法输入 `THINKING`，处理失败 `SWEAT`
 - 按收到消息当时的当前分钟即时生成海报
 - 使用 `all-members` scope
-- 返回 Top 7
+- 返回 Top 10；如果总人数不足 10，则显示全部成员
 - 复用 `outputs/feishu-cache/` 中同一分钟缓存
 - 使用邮箱别名文件修正显示名
 
@@ -43,6 +48,7 @@
 - `日报`: 当天 `00:00 -> 当前分钟`
 - `周报`: 本周一 `00:00 -> 当前分钟`
 - `月报`: 本月 1 日 `00:00 -> 当前分钟`
+- `总览`: 同时返回日 / 周 / 月三种统计的三合一图，均截止到当前分钟
 
 缓存行为：
 
@@ -59,6 +65,29 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 - 处理中的同一 `message_id` 重投不会双发
 - 已成功发送过的同一 `message_id` 在短时间内会被去重
 - 生成失败或上传失败时不会错误写入成功状态，飞书后续重投还能补发
+
+飞书定时通报服务当前职责：
+
+- 每天只在 `09:30` 向研发部群发送一条飞书 `post` 消息
+- 消息内容为“文字 + 一张三合一总览图”
+- 使用 `all-members` scope
+- 展示人数为 `min(总人数, 10)`
+- 只有命中 `09:30` 这个分钟窗口才会发送，其他时间启动或重启都不会补发
+- 成功发送后把当天 `09:30` 时间槽写入本地状态文件，避免重复发送
+
+三块图的时间口径：
+
+- 日统计：昨天 `00:00 -> 今天 00:00`
+- 周统计：
+  - 普通日期：本周一 `00:00 -> 今日 09:30`
+  - 周一：上周一 `00:00 -> 本周一 00:00`，消息文字里标记 `<上周总览>`
+- 月统计：
+  - 普通日期：本月 1 日 `00:00 -> 今日 09:30`
+  - 每月 1 日：上月 1 日 `00:00 -> 本月 1 日 00:00`，消息文字里标记 `<上月总览>`
+
+当前研发部群：
+
+- `FEISHU_REPORT_CHAT_ID=oc_026e62960a9516942a0933254bb3522d`
 
 ## 服务器目录约定
 
@@ -80,6 +109,7 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 
 - `server-get/`
 - 飞书机器人按需生成的 `feishu-cache/`
+- 定时群播报生成的 `scheduled-feishu/`
 
 ## 环境变量
 
@@ -93,6 +123,7 @@ SWITCHBASE_TEAMVIEW_OUTPUT_DIR=./outputs
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
 FEISHU_LOG_LEVEL=INFO
+FEISHU_REPORT_CHAT_ID=oc_026e62960a9516942a0933254bb3522d
 ```
 
 说明：
@@ -153,6 +184,7 @@ ssh weex-cloudserver '
 
 ```text
 deploy/systemd/yundrone-codex-feishu-bot.service
+deploy/systemd/yundrone-codex-feishu-group-reporter.service
 ```
 
 同步并启用：
@@ -162,10 +194,16 @@ rsync -avz \
   /Users/groove/Project/work/YunDrone/codex_logs/deploy/systemd/yundrone-codex-feishu-bot.service \
   weex-cloudserver:/tmp/yundrone-codex-feishu-bot.service
 
+rsync -avz \
+  /Users/groove/Project/work/YunDrone/codex_logs/deploy/systemd/yundrone-codex-feishu-group-reporter.service \
+  weex-cloudserver:/tmp/yundrone-codex-feishu-group-reporter.service
+
 ssh weex-cloudserver '
   echo 123123 | sudo -S cp /tmp/yundrone-codex-feishu-bot.service /etc/systemd/system/yundrone-codex-feishu-bot.service &&
+  echo 123123 | sudo -S cp /tmp/yundrone-codex-feishu-group-reporter.service /etc/systemd/system/yundrone-codex-feishu-group-reporter.service &&
   echo 123123 | sudo -S systemctl daemon-reload &&
-  echo 123123 | sudo -S systemctl enable --now yundrone-codex-feishu-bot.service
+  echo 123123 | sudo -S systemctl enable --now yundrone-codex-feishu-bot.service &&
+  echo 123123 | sudo -S systemctl enable --now yundrone-codex-feishu-group-reporter.service
 '
 ```
 
@@ -173,6 +211,12 @@ ssh weex-cloudserver '
 
 ```text
 ExecStart=/home/groove/apps/yundrone-codex-logs/.venv/bin/python -m scripts.run_feishu_bot
+```
+
+定时通报入口固定为：
+
+```text
+ExecStart=/home/groove/apps/yundrone-codex-logs/.venv/bin/python -m scripts.run_feishu_group_reporter
 ```
 
 ## 日常更新
@@ -205,9 +249,15 @@ rsync -avz /Users/groove/Project/work/YunDrone/codex_logs/teamview_aliases.json 
 ssh weex-cloudserver '
   cd /home/groove/apps/yundrone-codex-logs &&
   .venv/bin/pip install . &&
-  echo 123123 | sudo -S systemctl restart yundrone-codex-feishu-bot.service
+  echo 123123 | sudo -S systemctl restart yundrone-codex-feishu-bot.service &&
+  echo 123123 | sudo -S systemctl restart yundrone-codex-feishu-group-reporter.service
 '
 ```
+
+说明：
+
+- 现在定时群播报只会在 `09:30` 分钟窗口发送
+- 因此非 `09:30` 时段执行上述重启，不会触发补发
 
 ## 验证命令
 
@@ -215,12 +265,14 @@ ssh weex-cloudserver '
 
 ```bash
 ssh weex-cloudserver 'systemctl status yundrone-codex-feishu-bot.service --no-pager -l | sed -n "1,20p"'
+ssh weex-cloudserver 'systemctl status yundrone-codex-feishu-group-reporter.service --no-pager -l | sed -n "1,20p"'
 ```
 
 查看最近日志：
 
 ```bash
 ssh weex-cloudserver 'journalctl -u yundrone-codex-feishu-bot.service -n 120 --no-pager'
+ssh weex-cloudserver 'journalctl -u yundrone-codex-feishu-group-reporter.service -n 120 --no-pager'
 ```
 
 确认没有 API 端口监听：
@@ -243,17 +295,20 @@ ssh weex-cloudserver '
 
 - 群聊：`@Codex用量报告 日报`
 - 单聊：`月报`
+- 仅 `@Codex用量报告`：返回总览
+- `总览`：返回总览
+- `日报月报周报`：返回使用方法提示
 
 成功后，日志里应看到类似：
 
 ```text
-[feishu-bot] message_id=... chat_id=... period=daily outcome=generated
+[feishu-bot] message_id=... chat_id=... command=daily outcome=generated
 ```
 
 或：
 
 ```text
-[feishu-bot] message_id=... chat_id=... period=daily outcome=cache-hit
+[feishu-bot] message_id=... chat_id=... command=daily outcome=cache-hit
 ```
 
 ## 常见问题
@@ -309,4 +364,3 @@ ssh weex-cloudserver 'journalctl -u yundrone-codex-feishu-bot.service -n 200 --n
 - 飞书 webhook 回调
 
 如果后续要重新启用 API 或守护进程，建议作为单独变更处理，不要混进当前机器人运维流程。
-

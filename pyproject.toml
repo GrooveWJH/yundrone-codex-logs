@@ -19,6 +19,7 @@ teamview-cli = "switchbase_teamview.cli:run"
 teamview-api = "switchbase_teamview.api:main"
 teamview-report-daemon = "switchbase_teamview.report_daemon:main"
 teamview-feishu-bot = "switchbase_teamview.feishu_bot_main:main"
+teamview-feishu-group-reporter = "switchbase_teamview.feishu_group_reporter_main:main"
 
 [dependency-groups]
 dev = [
