@@ -155,9 +155,26 @@ def test_render_constants_keep_current_visual_language() -> None:
     assert render.DIVIDER_COLOR == "#4a4f57"
     assert render.MAIN_TITLE == "Codex token"
     assert render.REPORT_LABEL == "用量播报"
-    assert render.header_period_label(["daily", "weekly", "monthly"]) == "日统计 / 周统计 / 月统计"
-    assert 0.0 < render.PERIOD_BADGE_Y_OFFSET < 0.05
     assert 1.0 <= render.HEADER_ROW_AXES_Y <= 1.07
+
+
+def test_render_places_report_label_under_main_title() -> None:
+    figure = render.build_figure(_request(["daily", "weekly", "monthly"]))
+    text_map = {text.get_text(): text for text in figure.texts}
+
+    assert text_map["用量播报"].get_position()[0] == text_map["Codex token"].get_position()[0]
+    assert text_map["用量播报"].get_position()[1] < text_map["Codex token"].get_position()[1]
+
+
+def test_render_single_panel_restores_old_header_split() -> None:
+    figure = render.build_figure(_request(["daily"]))
+    figure_texts = [text.get_text() for text in figure.texts]
+    axis_texts = [text.get_text() for text in figure.axes[0].texts]
+
+    assert "日统计" in figure_texts
+    assert "用量播报" not in figure_texts
+    assert "用量播报" in axis_texts
+    assert "日统计" not in axis_texts
 
 
 def test_render_premium_bar_keeps_layering_without_gradient() -> None:

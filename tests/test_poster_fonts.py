@@ -22,8 +22,8 @@ def test_build_figure_uses_explicit_font_file_for_cjk_labels() -> None:
     text_files.update({text.get_text(): text.get_fontproperties().get_file() for axis in figure.axes for text in axis.texts})
 
     assert Path(text_files["Codex token"]).name == "NotoSansSC-Bold.otf"
-    assert Path(text_files["日统计"]).name == "NotoSansSC-Bold.otf"
     assert Path(text_files["用量播报"]).name == "NotoSansSC-Bold.otf"
+    assert Path(text_files["日统计"]).name == "NotoSansSC-Bold.otf"
     assert Path(text_files["杨庆彬"]).name == "NotoSansSC-Medium.otf"
     subtitle = next(text for text in text_files if text.endswith("CST"))
     assert Path(text_files[subtitle]).name == "NotoSansSC-Light.otf"
