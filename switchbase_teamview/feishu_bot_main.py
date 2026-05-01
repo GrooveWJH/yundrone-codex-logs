@@ -26,6 +26,7 @@ def main() -> None:
     handler = (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(service.handle_message_event)
+        .register_p2_card_action_trigger(service.handle_card_action_trigger)
         .build()
     )
     print(

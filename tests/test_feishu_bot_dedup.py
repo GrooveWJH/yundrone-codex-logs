@@ -37,11 +37,12 @@ def test_retries_same_message_id_after_image_send_failure(tmp_path: Path) -> Non
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
+            assert metric == "tokens"
             resolves.append(period)
             return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
 
-        def resolve_overview(self):  # pragma: no cover - defensive path
+        def resolve_overview(self, *, metric: str = "tokens"):  # pragma: no cover - defensive path
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
@@ -73,14 +74,15 @@ def test_retries_same_message_id_after_generate_failure(tmp_path: Path) -> None:
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
+            assert metric == "tokens"
             resolves.append(period)
             attempts["count"] += 1
             if attempts["count"] == 1:
                 raise RuntimeError("generate failed")
             return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
 
-        def resolve_overview(self):  # pragma: no cover - defensive path
+        def resolve_overview(self, *, metric: str = "tokens"):  # pragma: no cover - defensive path
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
@@ -110,10 +112,10 @@ def test_fallback_text_failure_does_not_mark_success(tmp_path: Path) -> None:
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
             raise FileNotFoundError(period)
 
-        def resolve_overview(self):  # pragma: no cover - defensive path
+        def resolve_overview(self, *, metric: str = "tokens"):  # pragma: no cover - defensive path
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
@@ -141,10 +143,10 @@ def test_short_circuits_when_message_is_inflight(tmp_path: Path) -> None:
             raise AssertionError((message_id, reaction_id))
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
             resolves.append(period)
 
-        def resolve_overview(self):  # pragma: no cover - defensive path
+        def resolve_overview(self, *, metric: str = "tokens"):  # pragma: no cover - defensive path
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(

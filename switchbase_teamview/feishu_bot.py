@@ -1,50 +1,29 @@
 from __future__ import annotations
 
 import json
-import re
+import threading
 import time
 from pathlib import Path
-from typing import Literal
 
+from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
 from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 
+from switchbase_teamview.feishu_commands import COMMAND_TARGETS
+from switchbase_teamview.feishu_commands import FAILURE_LABELS
+from switchbase_teamview.feishu_commands import USAGE_TEXT
+from switchbase_teamview.feishu_commands import Command
+from switchbase_teamview.feishu_commands import is_report_command
+from switchbase_teamview.feishu_commands import parse_command
 from switchbase_teamview.feishu_reports import FeishuReportCache
 
-Command = Literal["daily", "weekly", "monthly", "overview", "invalid"]
-Period = Literal["daily", "weekly", "monthly"]
 _DEDUP_TTL_SECONDS = 600.0
-_USAGE_TEXT = "可发送：日报 / 周报 / 月报 / 总览；仅 @ 机器人也会返回总览。"
 _REACTION_IN_PROGRESS = "Alarm"
 _REACTION_SUCCESS = "DONE"
 _REACTION_INVALID = "THINKING"
 _REACTION_FAILURE = "SWEAT"
-_COMMAND_ALIASES: dict[str, Command] = {
-    "日报": "daily",
-    "日榜": "daily",
-    "daily": "daily",
-    "周报": "weekly",
-    "周榜": "weekly",
-    "weekly": "weekly",
-    "月报": "monthly",
-    "月榜": "monthly",
-    "monthly": "monthly",
-    "总览": "overview",
-    "overview": "overview",
-}
-_FAILURE_LABELS: dict[Command, str] = {
-    "daily": "日报",
-    "weekly": "周报",
-    "monthly": "月报",
-    "overview": "总览",
-    "invalid": "命令",
-}
-
-
-def parse_command(text: str) -> Command:
-    normalized = _normalize_command_text(text)
-    if not normalized:
-        return "overview"
-    return _COMMAND_ALIASES.get(normalized, "invalid")
+_RATE_LIMIT_SECONDS = 5.0
+_RATE_LIMIT_TEXT = "失败，两次请求至少间隔5s"
 
 
 class FeishuBotService:
@@ -62,6 +41,9 @@ class FeishuBotService:
         self.time_provider = time_provider or time.monotonic
         self._inflight_message_ids: dict[str, float] = {}
         self._succeeded_message_ids: dict[str, float] = {}
+        self._last_report_request_at: dict[str, tuple[float, str]] = {}
+        self._rate_limit_lock = threading.Lock()
+        self.run_card_actions_async = True
 
     def handle_message_event(self, event: P2ImMessageReceiveV1) -> bool:
         message = getattr(getattr(event, "event", None), "message", None)
@@ -74,12 +56,22 @@ class FeishuBotService:
             self._log(message_id=message_id, chat_id=message.chat_id, command=command, outcome=deduped)
             return True
         alarm_reaction_id: str | None = None
-        if command == "invalid":
+        if command in {"invalid", "help"}:
             self._safe_add_reaction(message_id=message_id, emoji_type=_REACTION_INVALID, command=command)
-            return self._reply_text(message_id=message_id, chat_id=message.chat_id, command=command, text=_USAGE_TEXT)
+            return self._reply_usage(message_id=message_id, chat_id=message.chat_id, command=command)
+        if not self._reserve_report_slot(message.chat_id, message_id):
+            self._safe_add_reaction(message_id=message_id, emoji_type=_REACTION_FAILURE, command=command)
+            self._log(message_id=message_id, chat_id=message.chat_id, command=command, outcome="rate-limited")
+            return self._reply_text(
+                message_id=message_id,
+                chat_id=message.chat_id,
+                command=command,
+                text=_RATE_LIMIT_TEXT,
+            )
         alarm_reaction_id = self._safe_add_reaction(message_id=message_id, emoji_type=_REACTION_IN_PROGRESS, command=command)
         try:
-            report = self.report_cache.resolve_overview() if command == "overview" else self.report_cache.resolve(period=command)
+            metric, period = COMMAND_TARGETS[command]
+            report = self.report_cache.resolve_overview(metric=metric) if period is None else self.report_cache.resolve(period=period, metric=metric)
         except Exception as exc:
             self._finish_message(message_id, success=False)
             self._log(message_id=message_id, chat_id=message.chat_id, command=command, outcome="failed-generate", error=exc)
@@ -93,7 +85,7 @@ class FeishuBotService:
                 message_id=message_id,
                 chat_id=message.chat_id,
                 command=command,
-                text=f"{_FAILURE_LABELS[command]}生成失败，请稍后再试。",
+                text=f"{FAILURE_LABELS[command]}生成失败，请稍后再试。",
                 mark_success=False,
             )
         try:
@@ -133,6 +125,58 @@ class FeishuBotService:
             command=command,
             outcome="sent-text" if mark_success else "sent-text-retryable",
         )
+        return True
+
+    def _reply_usage(self, *, message_id: str, chat_id: str, command: Command) -> bool:
+        try:
+            sender = getattr(self.feishu_client, "send_usage_help_by_chat_id", None)
+            if callable(sender):
+                sender(chat_id=chat_id)
+            else:
+                self.feishu_client.send_text_by_chat_id(chat_id=chat_id, text=USAGE_TEXT)
+        except Exception as exc:
+            self._finish_message(message_id, success=False)
+            self._log(message_id=message_id, chat_id=chat_id, command=command, outcome="failed-send-text", error=exc)
+            return True
+        self._finish_message(message_id, success=True)
+        self._log(message_id=message_id, chat_id=chat_id, command=command, outcome="sent-help")
+        return True
+
+    def handle_card_action_trigger(self, event: P2CardActionTrigger) -> P2CardActionTriggerResponse:
+        command = _card_action_command(event)
+        chat_id = _card_action_chat_id(event)
+        action_id = _card_action_id(event)
+        if not chat_id or not is_report_command(command):
+            return _card_toast("warning", "无法识别按钮命令，请 @ 机器人发送 help。")
+        if not self._reserve_report_slot(chat_id, action_id):
+            self._log(message_id="card-action", chat_id=chat_id, command=command, outcome="rate-limited")
+            return _card_toast("warning", _RATE_LIMIT_TEXT)
+        if self.run_card_actions_async:
+            threading.Thread(target=self._send_card_report, args=(chat_id, command), daemon=True).start()
+        else:
+            self._send_card_report(chat_id, command)
+        return _card_toast("info", f"收到，正在生成 {FAILURE_LABELS[command]}。")
+
+    def _send_card_report(self, chat_id: str, command: Command) -> None:
+        try:
+            metric, period = COMMAND_TARGETS[command]
+            report = self.report_cache.resolve_overview(metric=metric) if period is None else self.report_cache.resolve(period=period, metric=metric)
+            self.feishu_client.send_image_by_chat_id(chat_id=chat_id, image_path=report.poster_path)
+        except Exception as exc:
+            self._log(message_id="card-action", chat_id=chat_id, command=command, outcome="failed-card-action", error=exc)
+            return
+        source = "cache-hit" if getattr(report, "from_cache", False) else "generated"
+        self._log(message_id="card-action", chat_id=chat_id, command=command, outcome=f"card-{source}")
+
+    def _reserve_report_slot(self, chat_id: str, request_id: str) -> bool:
+        now = self.time_provider()
+        with self._rate_limit_lock:
+            last = self._last_report_request_at.get(chat_id)
+            if last is not None and request_id and request_id == last[1]:
+                return True
+            if last is not None and now - last[0] < _RATE_LIMIT_SECONDS:
+                return False
+            self._last_report_request_at[chat_id] = (now, request_id)
         return True
 
     def _safe_add_reaction(self, *, message_id: str, emoji_type: str, command: Command) -> str | None:
@@ -188,13 +232,6 @@ class FeishuBotService:
         suffix = f" error={type(error).__name__}: {error}" if error else ""
         print(f"[feishu-bot] message_id={message_id} chat_id={chat_id} command={command} outcome={outcome}{suffix}", flush=True)
 
-
-def _normalize_command_text(text: str) -> str:
-    normalized = re.sub(r"@\S+", " ", text)
-    normalized = " ".join(normalized.split()).strip().lower()
-    return normalized
-
-
 def _message_text(raw_content: str) -> str:
     try:
         parsed = json.loads(raw_content)
@@ -205,3 +242,28 @@ def _message_text(raw_content: str) -> str:
         if isinstance(text, str):
             return text
     return raw_content
+
+
+def _card_action_command(event: P2CardActionTrigger) -> Command:
+    value = getattr(getattr(getattr(event, "event", None), "action", None), "value", None)
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str):
+            return command if is_report_command(command) else "invalid"
+    return "invalid"
+
+
+def _card_action_chat_id(event: P2CardActionTrigger) -> str:
+    context = getattr(getattr(event, "event", None), "context", None)
+    chat_id = getattr(context, "open_chat_id", None)
+    return chat_id if isinstance(chat_id, str) else ""
+
+
+def _card_action_id(event: P2CardActionTrigger) -> str:
+    context = getattr(getattr(event, "event", None), "context", None)
+    message_id = getattr(context, "open_message_id", None)
+    return message_id if isinstance(message_id, str) else ""
+
+
+def _card_toast(toast_type: str, content: str) -> P2CardActionTriggerResponse:
+    return P2CardActionTriggerResponse({"toast": {"type": toast_type, "content": content}})

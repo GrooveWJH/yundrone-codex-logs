@@ -41,6 +41,9 @@ class FeishuClient:
             content=json.dumps({"text": text}, ensure_ascii=False),
         )
 
+    def send_usage_help_by_chat_id(self, *, chat_id: str) -> None:
+        self._send_message(chat_id=chat_id, msg_type="interactive", content=self._usage_help_content())
+
     def send_post_with_image_by_chat_id(
         self,
         *,
@@ -115,3 +118,63 @@ class FeishuClient:
         content: list[list[dict[str, str]]] = [[{"tag": "text", "text": line}] for line in lines if line.strip()]
         content.append([{"tag": "img", "image_key": image_key}])
         return json.dumps({"zh_cn": {"title": title, "content": content}}, ensure_ascii=False)
+
+    @staticmethod
+    def _usage_help_content() -> str:
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {"title": {"tag": "plain_text", "content": "Codex 用量报告使用方法"}},
+            "elements": [
+                {"tag": "markdown", "content": "**点击按钮或 @ 机器人发送表格里的完整命令都可以生成报告。仅 @ 或发送空格，会返回本帮助。**"},
+                {
+                    "tag": "table",
+                    "columns": [
+                        {"name": "type", "display_name": "系列", "data_type": "text"},
+                        {"name": "daily", "display_name": "日", "data_type": "text"},
+                        {"name": "weekly", "display_name": "周", "data_type": "text"},
+                        {"name": "monthly", "display_name": "月", "data_type": "text"},
+                        {"name": "overview", "display_name": "总览", "data_type": "text"},
+                    ],
+                    "rows": [
+                        {"type": "Token", "daily": "日报", "weekly": "周报", "monthly": "月报", "overview": "总览"},
+                        {"type": "Quota", "daily": "quota日报", "weekly": "quota周报", "monthly": "quota月报", "overview": "quota"},
+                        {
+                            "type": "Intensity",
+                            "daily": "成本强度日报",
+                            "weekly": "成本强度周报",
+                            "monthly": "成本强度月报",
+                            "overview": "成本强度",
+                        },
+                    ],
+                },
+                {"tag": "action", "actions": _command_buttons("Token", ["日", "周", "月", "总"])},
+                {"tag": "action", "actions": _command_buttons("Quota", ["日", "周", "月", "总"])},
+                {"tag": "action", "actions": _command_buttons("Intensity", ["日", "周", "月", "总"])},
+            ],
+        }
+        return json.dumps(card, ensure_ascii=False)
+
+
+def _command_buttons(series: str, labels: list[str]) -> list[dict[str, object]]:
+    series_button = {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": series},
+        "type": "primary",
+        "value": {"command": _button_command(series, "总")},
+    }
+    period_buttons = [
+        {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": label},
+            "type": "default",
+            "value": {"command": _button_command(series, label)},
+        }
+        for label in labels
+    ]
+    return [series_button, *period_buttons]
+
+
+def _button_command(series: str, label: str) -> str:
+    prefixes = {"Token": "", "Quota": "quota_", "Intensity": "intensity_"}
+    suffixes = {"日": "daily", "周": "weekly", "月": "monthly", "总": "overview"}
+    return f"{prefixes[series]}{suffixes[label]}"

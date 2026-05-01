@@ -8,6 +8,7 @@ from tests.feishu_test_utils import message_event
 
 
 def test_handle_message_event_reuses_same_minute_cached_report(tmp_path: Path) -> None:
+    current = 100.0
     sent: list[tuple[str, Path]] = []
     poster = tmp_path / "outputs" / "feishu-cache" / "daily-202604161223-poster.png"
     poster.parent.mkdir(parents=True, exist_ok=True)
@@ -28,16 +29,23 @@ def test_handle_message_event_reuses_same_minute_cached_report(tmp_path: Path) -
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
+            assert metric == "tokens"
             resolves.append(period)
             return SimpleNamespace(period=period, poster_path=poster)
 
-        def resolve_overview(self):
+        def resolve_overview(self, *, metric: str = "tokens"):
             raise AssertionError("unexpected overview")
 
-    service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
+    service = FeishuBotService(
+        feishu_client=FakeFeishuClient(),
+        output_dir=tmp_path / "outputs",
+        report_cache=FakeCache(),
+        time_provider=lambda: current,
+    )
 
     assert service.handle_message_event(message_event(text="日报", message_id="om_first")) is True
+    current = 105.0
     assert service.handle_message_event(message_event(text="@Codex用量报告 日报", message_id="om_second")) is True
     assert resolves == ["daily", "daily"]
     assert sent == [("oc_test_chat", poster), ("oc_test_chat", poster)]
@@ -64,11 +72,12 @@ def test_handle_message_event_deduplicates_repeated_message_id(tmp_path: Path) -
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
+            assert metric == "tokens"
             resolves.append(period)
             return SimpleNamespace(period=period, poster_path=poster, from_cache=True)
 
-        def resolve_overview(self):
+        def resolve_overview(self, *, metric: str = "tokens"):
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(feishu_client=FakeFeishuClient(), output_dir=tmp_path / "outputs", report_cache=FakeCache())
@@ -102,11 +111,12 @@ def test_handle_message_event_allows_same_message_id_after_dedup_ttl(tmp_path: P
             return None
 
     class FakeCache:
-        def resolve(self, *, period: str):
+        def resolve(self, *, period: str, metric: str = "tokens"):
+            assert metric == "tokens"
             resolves.append(period)
             return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
 
-        def resolve_overview(self):
+        def resolve_overview(self, *, metric: str = "tokens"):
             raise AssertionError("unexpected overview")
 
     service = FeishuBotService(

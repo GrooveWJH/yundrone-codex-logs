@@ -47,6 +47,38 @@ def test_send_post_with_image_builds_single_post_message(tmp_path: Path) -> None
     }
 
 
+def test_send_usage_help_builds_table_card_message() -> None:
+    seen: dict[str, object] = {}
+
+    class FakeFeishuClient(FeishuClient):
+        def __init__(self) -> None:
+            pass
+
+        def _send_message(self, *, chat_id: str, msg_type: str, content: str) -> None:
+            seen["chat_id"] = chat_id
+            seen["msg_type"] = msg_type
+            seen["content"] = json.loads(content)
+
+    FakeFeishuClient().send_usage_help_by_chat_id(chat_id="oc_private")
+
+    elements = seen["content"]["elements"]  # type: ignore[index]
+    table = elements[1]
+    assert seen["chat_id"] == "oc_private"
+    assert seen["msg_type"] == "interactive"
+    assert seen["content"]["header"]["title"]["content"] == "Codex 用量报告使用方法"  # type: ignore[index]
+    assert elements[0]["tag"] == "markdown"
+    assert table["tag"] == "table"
+    assert [column["display_name"] for column in table["columns"]] == ["系列", "日", "周", "月", "总览"]
+    assert table["rows"][0] == {"type": "Token", "daily": "日报", "weekly": "周报", "monthly": "月报", "overview": "总览"}
+    assert table["rows"][1]["daily"] == "quota日报"
+    assert table["rows"][2]["daily"] == "成本强度日报"
+    assert table["rows"][2]["overview"] == "成本强度"
+    assert elements[2]["actions"][0]["value"] == {"command": "overview"}
+    assert elements[2]["actions"][1]["value"] == {"command": "daily"}
+    assert elements[4]["actions"][0]["value"] == {"command": "intensity_overview"}
+    assert elements[4]["actions"][3]["value"] == {"command": "intensity_monthly"}
+
+
 def test_add_and_delete_message_reaction_build_requests() -> None:
     seen: dict[str, object] = {}
 
