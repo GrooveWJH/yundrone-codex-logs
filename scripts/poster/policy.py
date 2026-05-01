@@ -27,5 +27,9 @@ def _item_allowed(item: RankingItem, policy: DataPolicy) -> bool:
     return bool(domains) and any(email.endswith(f"@{domain}") for domain in domains)
 
 
-def _sort_tuple(item: RankingItem) -> tuple[int, str, str]:
-    return (-item.used_tokens, item.email, item.username)
+def _sort_tuple(item: RankingItem) -> tuple[float, str, str]:
+    return (-_ranking_value(item), item.email, item.username)
+
+
+def _ranking_value(item: RankingItem) -> float:
+    return item.metric_value if item.metric_value is not None else float(item.used_tokens)

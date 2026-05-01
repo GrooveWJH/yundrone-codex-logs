@@ -98,6 +98,7 @@ class DashboardService:
                 "total_members": usage.data.total_members,
                 "total_quota": usage.data.total_quota,
                 "total_used_quota": usage.data.total_used_quota,
+                "total_window_used_quota": usage.data.total_window_used_quota,
                 "total_used_tokens": usage.data.total_used_tokens,
                 "total_request_count": usage.data.total_request_count,
                 "queried_at": usage.data.queried_at,
@@ -228,6 +229,7 @@ class DashboardService:
                 "request_count": member.request_count,
                 "used_tokens": member.used_tokens,
                 "used_quota": member.used_quota,
+                "window_used_quota": member.window_used_quota,
                 "quota": member.quota,
                 "newapi_user_id": member.newapi_user_id,
                 "synced_at": member.synced_at,
@@ -280,15 +282,8 @@ class DashboardService:
         elif chosen == "last_month":
             current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             last_month_end = current_month_start
-            last_month_start = (current_month_start - timedelta(days=1)).replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0
-            )
-            return {
-                "preset": chosen,
-                "label": "上月",
-                "start_timestamp": int(last_month_start.timestamp()),
-                "end_timestamp": int(last_month_end.timestamp()),
-            }
+            last_month_start = (current_month_start - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            return {"preset": chosen, "label": "上月", "start_timestamp": int(last_month_start.timestamp()), "end_timestamp": int(last_month_end.timestamp())}
         else:
             raise TeamViewError(f"Unsupported preset: {chosen}")
 

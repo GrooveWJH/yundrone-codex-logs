@@ -54,6 +54,27 @@ def test_build_snapshot_applies_default_policy() -> None:
     assert snapshot.items[0].rank == 1
 
 
+def test_build_snapshot_keeps_raw_intensity_ratio() -> None:
+    payload = {
+        "ranking_type": "daily",
+        "generated_at": 1_776_007_200,
+        "items": [
+            {"display_name": "High", "used_tokens": 100, "window_used_quota": 150},
+            {"display_name": "Half", "used_tokens": 100, "window_used_quota": 50},
+            {"display_name": "Zero", "used_tokens": 0, "window_used_quota": 999},
+        ],
+    }
+
+    snapshot = loaders.load_snapshot_from_memory(
+        payload,
+        period="daily",
+        policy=DataPolicy(scope="all-members", metric="intensity", top_n=3),
+        source="memory",
+    )
+
+    assert [item.metric_value for item in snapshot.items] == [1.5, 0.5, 0.0]
+
+
 def test_load_snapshot_from_json_matches_in_memory_builder(tmp_path: Path) -> None:
     input_file = tmp_path / "daily.json"
     input_file.write_text(json.dumps(_payload()), encoding="utf-8")

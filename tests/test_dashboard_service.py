@@ -14,6 +14,7 @@ def _usage_response(members: list[dict[str, object]]) -> UsageResponse:
     total_request_count = sum(int(member["request_count"]) for member in members)
     total_quota = sum(int(member["quota"]) for member in members)
     total_used_quota = sum(int(member["used_quota"]) for member in members)
+    total_window_used_quota = sum(int(member.get("window_used_quota", 0)) for member in members)
     return UsageResponse.model_validate(
         {
             "success": True,
@@ -21,6 +22,7 @@ def _usage_response(members: list[dict[str, object]]) -> UsageResponse:
                 "total_members": len(members),
                 "total_quota": total_quota,
                 "total_used_quota": total_used_quota,
+                "total_window_used_quota": total_window_used_quota,
                 "total_used_tokens": total_used_tokens,
                 "total_request_count": total_request_count,
                 "members": members,
@@ -96,6 +98,7 @@ def test_dashboard_service_applies_alias_and_last_7_days_window(tmp_path: Path) 
     assert payload["members"][0]["display_name"] == "Alice Ops"
     assert payload["members"][1]["display_name"] == "bob"
     assert payload["summary"]["total_used_tokens"] == 410
+    assert payload["summary"]["total_window_used_quota"] == 0
     assert seen_calls == [(expected_start, expected_end)]
 
 

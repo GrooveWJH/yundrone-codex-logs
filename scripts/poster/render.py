@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
 
 from scripts.poster import fonts, layout
@@ -25,6 +25,8 @@ GRID_COLOR = "#dee2e6"
 DIVIDER_COLOR = "#4a4f57"
 BAR_FILL_COLOR = "#2f343b"
 BAR_PREMIUM_HIGHLIGHT_COLOR = "#565c64"
+QUOTA_TITLE_COLOR = "#0b4f2a"
+INTENSITY_TITLE_COLOR = "#2F5693"
 RANK_COLORS = ["#f5a623", "#9b9b9b", "#b87333", "#adb5bd", "#adb5bd"]
 PERIOD_TITLES: dict[Period, str] = {"daily": "日统计", "weekly": "周统计", "monthly": "月统计"}
 MAIN_TITLE = "Codex token"
@@ -52,7 +54,7 @@ def build_figure(request: PosterRequest) -> Figure:
     outer_margin = min(left_x, 1.0 - right_x)
     title_row_y = 1.0 - outer_margin
 
-    title_text = fig.text(left_x, title_row_y, config.main_title, color=TEXT_PRIMARY, fontproperties=font_set["header_title"], ha="left", va="top")
+    title_text = fig.text(left_x, title_row_y, config.main_title, color=_main_title_color(config), fontproperties=font_set["header_title"], ha="left", va="top")
     header_text = fig.text(
         right_x if is_single_panel else left_x,
         title_row_y - config.period_badge_y_offset if is_single_panel else title_row_y - layout.fig_gap_from_pt(22.0, figure_height_in=config.figure_height_in),
@@ -92,7 +94,7 @@ def period_subtitle(snapshot: RankingSnapshot) -> str:
     return f"{start.strftime('%Y/%m')}/01 {start.strftime(fmt_hm)} – {end.strftime(fmt_md)} {end.strftime(fmt_hm)} CST"
 def header_period_label(periods: list[Period]) -> str:
     return " / ".join(PERIOD_TITLES[period] for period in periods)
-def draw_right_rounded_bar(
+def draw_bar(
     axis: Axes,
     *,
     y_center: float,
@@ -103,30 +105,24 @@ def draw_right_rounded_bar(
 ) -> None:
     if width <= 0:
         return
-    radius = min(height / 2.0, width / 2.0)
-    rect_width = max(width - radius, 0.0)
     axis.add_patch(
-        Rectangle((0.0, y_center - height / 2.0), rect_width, height, facecolor=color, edgecolor="none", zorder=3)
+        Rectangle((0.0, y_center - height / 2.0), width, height, facecolor=color, edgecolor="none", zorder=3)
     )
-    if premium and rect_width > 0:
+    if premium:
         axis.add_patch(
             Rectangle(
                 (0.0, y_center - height / 2.0),
-                rect_width,
+                width,
                 height * 0.30,
                 facecolor=BAR_PREMIUM_HIGHLIGHT_COLOR,
                 edgecolor="none",
                 zorder=4,
             )
         )
-    axis.add_patch(Circle((rect_width, y_center), radius=radius, facecolor=color, edgecolor="none", zorder=3))
 def draw_track(axis: Axes, *, y_center: float, width: float, height: float) -> None:
-    radius = height / 2.0
-    rect_width = max(width - radius, 0.0)
     axis.add_patch(
-        Rectangle((0.0, y_center - height / 2.0), rect_width, height, facecolor=TRACK_COLOR, edgecolor="none", zorder=1)
+        Rectangle((0.0, y_center - height / 2.0), width, height, facecolor=TRACK_COLOR, edgecolor="none", zorder=1)
     )
-    axis.add_patch(Circle((rect_width, y_center), radius=radius, facecolor=TRACK_COLOR, edgecolor="none", zorder=1))
 def _draw_rank_panel(axis: Axes, snapshot: RankingSnapshot, config: PosterConfig, font_set: dict[str, object], *, header_label: str) -> None:
     axis.set_facecolor(FIG_BG)
     chart_layout = layout.build_chart_layout(snapshot.items, config=config)
@@ -144,36 +140,44 @@ def _draw_rank_panel(axis: Axes, snapshot: RankingSnapshot, config: PosterConfig
 
     bar_height = 0.46
     y_positions = list(range(len(snapshot.items)))
+    axis.set_ylim(-1.05, len(snapshot.items) - 0.3)
+    axis.set_xlim(0, chart_layout.xlim)
     for index, (y_pos, item) in enumerate(zip(y_positions, snapshot.items)):
         draw_track(axis, y_center=y_pos, width=chart_layout.track_width, height=bar_height)
-        draw_right_rounded_bar(
+        draw_bar(
             axis,
             y_center=y_pos,
-            width=item.used_tokens * chart_layout.bar_scale,
+            width=layout.item_value(item) * chart_layout.bar_scale,
             height=bar_height,
             color=BAR_FILL_COLOR,
             premium=index < 3,
         )
-    axis.set_ylim(-1.05, len(snapshot.items) - 0.3)
-    axis.set_xlim(0, chart_layout.xlim)
     axis.invert_yaxis()
     axis.set_yticks([])
     axis.set_xticks(chart_layout.ticks)
-    axis.xaxis.set_major_formatter(FuncFormatter(layout.axis_tick_label))
+    axis.xaxis.set_major_formatter(FuncFormatter(lambda value, pos: layout.metric_axis_tick_label(value, config.value_format)))
     axis.tick_params(axis="x", colors=AXIS_TEXT, labelsize=10, length=0, pad=8)
     axis.xaxis.grid(True, color=GRID_COLOR, linestyle="-", linewidth=0.8)
     axis.set_axisbelow(True)
     for spine in axis.spines.values():
         spine.set_visible(False)
-    _draw_labels(axis, snapshot.items, chart_layout, font_set)
-def _draw_labels(axis: Axes, items: list[RankingItem], chart_layout: layout.ChartLayout, font_set: dict[str, object]) -> None:
+    _draw_labels(axis, snapshot.items, chart_layout, font_set, value_format=config.value_format)
+def _draw_labels(axis: Axes, items: list[RankingItem], chart_layout: layout.ChartLayout, font_set: dict[str, object], *, value_format: str) -> None:
     for index, (y_pos, item) in enumerate(zip(range(len(items)), items), start=1):
         label_y = y_pos - 0.46
         axis.text(-chart_layout.max_value * 0.005, label_y, f"#{index}", ha="right", va="center", color=_rank_color(index), fontproperties=font_set["rank"])
         axis.text(chart_layout.max_value * 0.012, label_y, item.display_name, ha="left", va="center", color=TEXT_PRIMARY, fontproperties=font_set["name"])
-        axis.text(item.used_tokens * chart_layout.bar_scale + chart_layout.label_gap_data, y_pos, layout.compact_tokens(item.used_tokens), ha="left", va="center", color=TEXT_SECONDARY, fontproperties=font_set["value"])
+        value = layout.item_value(item)
+        axis.text(value * chart_layout.bar_scale + chart_layout.label_gap_data, y_pos, layout.compact_value(value, value_format), ha="left", va="center", color=TEXT_SECONDARY, fontproperties=font_set["value"])
 def _rank_color(index: int) -> str:
     return RANK_COLORS[min(index - 1, len(RANK_COLORS) - 1)]
+def _main_title_color(config: PosterConfig) -> str:
+    title = config.main_title.lower()
+    if config.value_format == "quota" or "quota" in title:
+        return QUOTA_TITLE_COLOR
+    if config.value_format == "intensity" or "intensity" in title:
+        return INTENSITY_TITLE_COLOR
+    return TEXT_PRIMARY
 def _font_set(config: PosterConfig, font_paths: dict[str, object]) -> dict[str, object]:
     return {
         "header_title": fonts.font_properties(path=font_paths.get("bold"), size=config.header_title_font_size),

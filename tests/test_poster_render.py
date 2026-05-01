@@ -10,7 +10,6 @@ from PIL import Image
 from scripts.poster import fonts, layout, render
 from scripts.poster.models import PosterConfig, PosterRequest, RankingItem, RankingSnapshot
 
-
 def _snapshot(period: str = "daily") -> RankingSnapshot:
     return RankingSnapshot(
         period=period,
@@ -68,10 +67,7 @@ def _snapshot(period: str = "daily") -> RankingSnapshot:
 
 
 def _request(periods: list[str]) -> PosterRequest:
-    return PosterRequest(
-        snapshots=[_snapshot(period) for period in periods],
-        config=PosterConfig(),
-    )
+    return PosterRequest(snapshots=[_snapshot(period) for period in periods], config=PosterConfig())
 
 
 def test_layout_scales_bars_so_top_label_stays_inside_last_gridline() -> None:
@@ -153,17 +149,20 @@ def test_render_constants_keep_current_visual_language() -> None:
     assert render.BAR_FILL_COLOR == "#2f343b"
     assert render.BAR_PREMIUM_HIGHLIGHT_COLOR == "#565c64"
     assert render.DIVIDER_COLOR == "#4a4f57"
+    assert render.QUOTA_TITLE_COLOR == "#0b4f2a"
+    assert render.INTENSITY_TITLE_COLOR == "#2F5693"
     assert render.MAIN_TITLE == "Codex token"
     assert render.REPORT_LABEL == "用量播报"
     assert 1.0 <= render.HEADER_ROW_AXES_Y <= 1.07
 
 
-def test_render_places_report_label_under_main_title() -> None:
+def test_render_places_overview_report_label_under_main_title() -> None:
     figure = render.build_figure(_request(["daily", "weekly", "monthly"]))
     text_map = {text.get_text(): text for text in figure.texts}
 
     assert text_map["用量播报"].get_position()[0] == text_map["Codex token"].get_position()[0]
     assert text_map["用量播报"].get_position()[1] < text_map["Codex token"].get_position()[1]
+    assert text_map["用量播报"].get_ha() == "left"
 
 
 def test_render_single_panel_restores_old_header_split() -> None:
@@ -177,8 +176,55 @@ def test_render_single_panel_restores_old_header_split() -> None:
     assert "日统计" not in axis_texts
 
 
+def test_render_quota_and_intensity_use_metric_values() -> None:
+    quota_items = [
+        RankingItem(display_name="Low Token High Quota", used_tokens=10, window_used_quota=900, metric_value=900),
+        RankingItem(display_name="High Token Low Quota", used_tokens=1000, window_used_quota=100, metric_value=100),
+    ]
+    intensity_items = [
+        RankingItem(display_name="Zero Token", used_tokens=0, window_used_quota=500, metric_value=0),
+        RankingItem(display_name="Efficient", used_tokens=100, window_used_quota=50, metric_value=0.5),
+    ]
+
+    quota_layout = layout.build_chart_layout(quota_items, config=PosterConfig(value_format="quota"))
+    intensity_layout = layout.build_chart_layout(intensity_items, config=PosterConfig(value_format="intensity"))
+
+    assert quota_layout.max_value == 900
+    assert intensity_layout.max_value == 0.5
+    assert layout.compact_value(0.5, "intensity") == "0.500"
+
+
+def test_render_uses_square_bar_caps_for_small_metric_values() -> None:
+    snapshot = RankingSnapshot(
+        period="daily",
+        generated_at=0,
+        source="test",
+        scope="all-members",
+        items=[
+            RankingItem(display_name="Top", metric_value=1.0, used_tokens=1, rank=1),
+            RankingItem(display_name="Small", metric_value=0.1, used_tokens=1, rank=2),
+        ],
+    )
+
+    figure = render.build_figure(PosterRequest(snapshots=[snapshot], config=PosterConfig(value_format="intensity")))
+    patches = figure.axes[0].patches
+
+    assert any(patch.__class__.__name__ == "Rectangle" and patch.get_zorder() == 3 for patch in patches)
+    assert not any(patch.__class__.__name__ == "Ellipse" for patch in patches)
+
+
+def test_render_uses_metric_title_colors_and_square_track_caps() -> None:
+    quota = render.build_figure(PosterRequest(snapshots=[_snapshot()], config=PosterConfig(main_title="Codex quota", value_format="quota")))
+    intensity = render.build_figure(PosterRequest(snapshots=[_snapshot()], config=PosterConfig(main_title="Codex intensity", value_format="intensity")))
+
+    assert quota.texts[0].get_color() == render.QUOTA_TITLE_COLOR
+    assert intensity.texts[0].get_color() == render.INTENSITY_TITLE_COLOR
+    assert any(patch.__class__.__name__ == "Rectangle" and patch.get_zorder() == 1 for patch in intensity.axes[0].patches)
+    assert not any(patch.__class__.__name__ == "Ellipse" for patch in intensity.axes[0].patches)
+
+
 def test_render_premium_bar_keeps_layering_without_gradient() -> None:
-    source = inspect.getsource(render.draw_right_rounded_bar)
+    source = inspect.getsource(render.draw_bar)
 
     assert "premium" in source
     assert "imshow" not in source

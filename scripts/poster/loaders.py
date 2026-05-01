@@ -75,6 +75,8 @@ def _to_ranking_item(raw_item: dict[str, Any], *, policy: DataPolicy) -> Ranking
         raw_display_name=str(raw_item.get("raw_display_name") or raw_item.get("display_name") or "").strip(),
         username=str(raw_item.get("username") or "").strip(),
         used_tokens=int(raw_item.get("used_tokens") or 0),
+        window_used_quota=int(raw_item.get("window_used_quota") or 0),
+        metric_value=_metric_value(raw_item, policy.metric),
         request_count=int(raw_item.get("request_count") or 0),
     )
 
@@ -86,3 +88,13 @@ def _display_name(raw_item: dict[str, Any], *, strategy: str) -> str:
         if value:
             return value
     return ""
+
+
+def _metric_value(raw_item: dict[str, Any], metric: str) -> float:
+    used_tokens = int(raw_item.get("used_tokens") or 0)
+    window_used_quota = int(raw_item.get("window_used_quota") or 0)
+    if metric == "quota":
+        return float(window_used_quota)
+    if metric == "intensity":
+        return float(window_used_quota / used_tokens) if used_tokens else 0.0
+    return float(used_tokens)

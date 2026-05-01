@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 Period = Literal["daily", "weekly", "monthly"]
 InputSource = Literal["api", "json", "memory-test-hook", "teamview"]
 RankingScope = Literal["filtered", "all-members"]
+ReportMetric = Literal["tokens", "quota", "intensity"]
 SortKey = Literal["used_tokens_desc"]
 DisplayNameStrategy = Literal["display_name_first"]
 
@@ -23,6 +24,8 @@ class RankingItem(PosterModel):
     raw_display_name: str = ""
     username: str = ""
     used_tokens: int = 0
+    window_used_quota: int = 0
+    metric_value: float | None = None
     request_count: int = 0
     rank: int = 0
 
@@ -40,6 +43,7 @@ class DataPolicy(PosterModel):
     allowed_email_domains: list[str] = Field(default_factory=lambda: ["yundrone.cn"])
     excluded_emails: list[str] = Field(default_factory=lambda: ["codex@yundrone.cn"])
     top_n: int = 5
+    metric: ReportMetric = "tokens"
     sort_key: SortKey = "used_tokens_desc"
     display_name_strategy: DisplayNameStrategy = "display_name_first"
 
@@ -59,6 +63,7 @@ class PosterConfig(PosterModel):
     rank_font_size: float = 11.0
     name_font_size: float = 13.0
     value_font_size: float = 11.0
+    value_format: ReportMetric = "tokens"
     font_dir: Path | None = None
     font_cache_dir: Path | None = None
     font_url: str | None = None

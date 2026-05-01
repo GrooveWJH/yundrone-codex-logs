@@ -21,6 +21,7 @@ class UsageMember(TeamViewModel):
     role: str
     quota: int
     used_quota: int
+    window_used_quota: int = 0
     request_count: int
     used_tokens: int
     user_group: str
@@ -31,6 +32,7 @@ class UsageData(TeamViewModel):
     total_members: int
     total_quota: int
     total_used_quota: int
+    total_window_used_quota: int = 0
     total_used_tokens: int
     total_request_count: int
     members: list[UsageMember]

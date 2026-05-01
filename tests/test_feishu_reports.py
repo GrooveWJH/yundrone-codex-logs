@@ -179,3 +179,57 @@ def test_feishu_report_cache_builds_and_reuses_overview_per_minute(tmp_path: Pat
     assert first.from_cache is False
     assert second.from_cache is True
     assert [call[0] for call in calls] == ["daily", "weekly", "monthly"]
+
+
+def test_feishu_report_cache_uses_metric_specific_cache_and_titles(tmp_path: Path, monkeypatch) -> None:
+    seen_titles: list[str] = []
+    calls: list[tuple[str, int, int, int]] = []
+
+    class FakeService:
+        def build_ranking(self, *, scope: str, ranking_type: str, start_timestamp: int, end_timestamp: int, limit: int):
+            calls.append((ranking_type, start_timestamp, end_timestamp, limit))
+            return {
+                "scope": scope,
+                "ranking_type": ranking_type,
+                "generated_at": end_timestamp,
+                "items": [
+                    {
+                        "email": "alice@example.com",
+                        "display_name": "Alice",
+                        "window_used_quota": 200,
+                        "used_tokens": 100,
+                        "request_count": 1,
+                    }
+                ],
+            }
+
+    class FakeGenerator:
+        def __init__(self) -> None:
+            self.service = FakeService()
+
+    def fake_build_figure(request):
+        seen_titles.append(request.config.main_title)
+        return object()
+
+    def fake_save_png(figure, output_path: Path, *, dpi: int = 250, facecolor: str = "#f5f6fa") -> Path:
+        del figure, dpi, facecolor
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"png")
+        return output_path
+
+    monkeypatch.setattr("switchbase_teamview.feishu_reports.build_figure", fake_build_figure)
+    monkeypatch.setattr("switchbase_teamview.feishu_reports.export.save_png", fake_save_png)
+
+    cache = FeishuReportCache(
+        report_generator=FakeGenerator(),
+        cache_dir=tmp_path / "feishu-cache",
+        now_provider=lambda: datetime(2026, 4, 16, 12, 23, 12, tzinfo=_TZ),
+    )
+
+    quota = cache.resolve(period="daily", metric="quota")
+    intensity = cache.resolve_overview(metric="intensity")
+
+    assert "/quota/" in quota.poster_path.as_posix()
+    assert "/intensity/" in intensity.poster_path.as_posix()
+    assert seen_titles == ["Codex quota", "Codex intensity"]
+    assert [call[0] for call in calls] == ["daily", "daily", "weekly", "monthly"]
