@@ -7,7 +7,6 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "lark-oapi>=1.5.3",
-    "matplot>=0.1.9",
     "pydantic>=2.11.0",
     "python-dotenv>=1.1.0",
     "python-socks>=2.8.1",
@@ -17,9 +16,7 @@ dependencies = [
 [project.scripts]
 teamview-cli = "switchbase_teamview.cli:run"
 teamview-api = "switchbase_teamview.api:main"
-teamview-report-daemon = "switchbase_teamview.report_daemon:main"
 teamview-feishu-bot = "switchbase_teamview.feishu_bot_main:main"
-teamview-feishu-group-reporter = "switchbase_teamview.feishu_group_reporter_main:main"
 
 [dependency-groups]
 dev = [
@@ -38,11 +35,12 @@ include = [
     ".codex/check-maxline.json",
     "switchbase_teamview/**/*.py",
     "scripts/**/*.py",
+    "typst/**/*.typ",
     "tests/**/*.py",
     ".env.template",
     ".gitignore",
     "README.md",
-    "teamview_aliases.template.json",
+    "teamview_whitelist.template.json",
     "pyproject.toml",
 ]
 

@@ -6,7 +6,6 @@ import hmac
 import json
 import os
 from collections.abc import Callable, Iterable
-from pathlib import Path
 from socketserver import ThreadingMixIn
 from typing import Any
 from urllib.parse import parse_qs
@@ -17,15 +16,6 @@ from switchbase_teamview.env import load_project_env
 from switchbase_teamview.exceptions import TeamViewError
 
 JSON_HEADERS = [("Content-Type", "application/json; charset=utf-8")]
-PNG_HEADERS = [("Content-Type", "image/png")]
-ALLOWED_REPORT_FILES = {
-    "daily.json": ("json", "daily.json"),
-    "weekly.json": ("json", "weekly.json"),
-    "monthly.json": ("json", "monthly.json"),
-    "daily-poster.png": ("png", "daily-poster.png"),
-    "weekly-poster.png": ("png", "weekly-poster.png"),
-    "monthly-poster.png": ("png", "monthly-poster.png"),
-}
 
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
@@ -36,13 +26,10 @@ def create_app(
     *,
     service: Any | None = None,
     public_token: str | None = None,
-    output_dir: Path | None = None,
 ) -> Callable:
     load_project_env()
     dashboard_service = service or DashboardService.from_env()
     expected_token = public_token if public_token is not None else os.getenv("SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN", "")
-    report_output_dir = output_dir or Path(os.getenv("SWITCHBASE_TEAMVIEW_OUTPUT_DIR", "outputs"))
-
     def app(environ: dict[str, Any], start_response: Callable) -> Iterable[bytes]:
         path = environ.get("PATH_INFO", "")
         method = str(environ.get("REQUEST_METHOD", "GET")).upper()
@@ -60,12 +47,6 @@ def create_app(
             except Exception as exc:  # pragma: no cover - defensive path
                 return _json_response(start_response, 502, {"detail": str(exc)})
             return _json_response(start_response, 200, payload)
-        if path.startswith("/api/generated-reports/"):
-            provided_token = _query_token(environ)
-            if not expected_token or not hmac.compare_digest(provided_token, expected_token):
-                return _json_response(start_response, 403, {"detail": "Forbidden"})
-            filename = path.removeprefix("/api/generated-reports/").strip("/")
-            return _report_file_response(start_response, report_output_dir, filename)
         return _json_response(start_response, 404, {"detail": "Not Found"})
 
     return app
@@ -85,20 +66,6 @@ def _json_response(start_response: Callable, status_code: int, payload: dict[str
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = [*JSON_HEADERS, ("Content-Length", str(len(body)))]
     start_response(f"{status_code} {_reason_phrase(status_code)}", headers)
-    return [body]
-
-
-def _report_file_response(start_response: Callable, output_dir: Path, filename: str) -> list[bytes]:
-    allowed = ALLOWED_REPORT_FILES.get(filename)
-    if allowed is None:
-        return _json_response(start_response, 404, {"detail": "Not Found"})
-    kind, safe_name = allowed
-    path = output_dir / safe_name
-    if not path.exists() or not path.is_file():
-        return _json_response(start_response, 404, {"detail": "Not Found"})
-    body = path.read_bytes()
-    headers = [*(JSON_HEADERS if kind == "json" else PNG_HEADERS), ("Content-Length", str(len(body)))]
-    start_response("200 OK", headers)
     return [body]
 
 

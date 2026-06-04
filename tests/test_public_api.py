@@ -77,35 +77,10 @@ def test_public_api_rejects_unsupported_ranking_type_with_existing_error_shape()
     assert json.loads(body) == {"detail": "Unsupported ranking_type: yearly"}
 
 
-def test_public_api_serves_generated_report_json_and_png_files(tmp_path: Path) -> None:
-    output_dir = tmp_path / "outputs"
-    output_dir.mkdir()
-    (output_dir / "daily.json").write_text(json.dumps({"ranking_type": "daily", "items": []}), encoding="utf-8")
-    (output_dir / "daily-poster.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+def test_public_api_no_longer_serves_generated_report_files() -> None:
+    app = api_module.create_app(service=object(), public_token="weird-token")
 
-    app = api_module.create_app(service=object(), public_token="weird-token", output_dir=output_dir)
+    response = _request(app, "/api/generated-reports/daily-poster.png", "token=weird-token")
 
-    json_response = _request(app, "/api/generated-reports/daily.json", "token=weird-token")
-    png_response = _request(app, "/api/generated-reports/daily-poster.png", "token=weird-token")
-
-    assert json_response[0] == 200
-    assert json_response[1]["Content-Type"] == "application/json; charset=utf-8"
-    assert json.loads(json_response[2]) == {"ranking_type": "daily", "items": []}
-    assert png_response[0] == 200
-    assert png_response[1]["Content-Type"] == "image/png"
-    assert png_response[2].startswith(b"\x89PNG")
-
-
-def test_public_api_generated_report_routes_require_token_and_return_404_when_missing(tmp_path: Path) -> None:
-    output_dir = tmp_path / "outputs"
-    output_dir.mkdir()
-    (output_dir / "weekly.json").write_text(json.dumps({"ranking_type": "weekly", "items": []}), encoding="utf-8")
-
-    app = api_module.create_app(service=object(), public_token="weird-token", output_dir=output_dir)
-
-    forbidden = _request(app, "/api/generated-reports/weekly.json", "token=bad-token")
-    missing = _request(app, "/api/generated-reports/monthly.json", "token=weird-token")
-
-    assert forbidden[0] == 403
-    assert missing[0] == 404
-    assert json.loads(missing[2]) == {"detail": "Not Found"}
+    assert response[0] == 404
+    assert json.loads(response[2]) == {"detail": "Not Found"}

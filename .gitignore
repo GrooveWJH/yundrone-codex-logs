@@ -7,9 +7,10 @@ __pycache__/
 *.pyo
 *.pyd
 
-teamview_aliases.json
+teamview_whitelist.json
 outputs/
 tmp/
+typst/*.png
 .claude/settings.local.json
 
 .DS_Store

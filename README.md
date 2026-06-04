@@ -1,31 +1,30 @@
 # yundrone-codex-logs
 
-YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决四件事：
+YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决三件事：
 
 - 拉取 TeamView `usage` / `logs` 数据
-- 生成排行榜 JSON 与海报 PNG
-- 运行飞书长连接机器人，响应 `日报` / `周报` / `月报`
-- 运行飞书定时通报服务，向研发部群定时发送每日总览图
+- 使用 Typst 生成排行榜 PNG
+- 运行飞书长连接机器人，响应 Token `报告` 三合一图
 
-当前线上正式运行形态已经收口为：`weex-cloudserver` 只保留两个飞书服务，不再对外提供 HTTP API，也不再常驻运行榜单守护进程。
+当前线上正式运行形态已经收口为：`self-cloudserver` 只保留飞书长连接机器人，不再对外提供 HTTP API，不再运行榜单守护进程，也暂不运行定时群通报。
 
 ## 当前生产状态
 
-截至现在，服务器 `weex-cloudserver` 的实际状态是：
+截至现在，服务器 `self-cloudserver` 的目标状态是：
 
 - `yundrone-codex-feishu-bot.service`: `active` + `enabled`
-- `yundrone-codex-feishu-group-reporter.service`: `active` + `enabled`
 - `yundrone-codex-logs.service`: `inactive` + `disabled`
 - `yundrone-codex-report-daemon.service`: `inactive` + `disabled`
-- `47593` 端口当前没有监听
+- `yundrone-codex-feishu-group-reporter.service`: `inactive` + `disabled` 或不存在
+- `47593` 端口不监听
 
 这意味着：
 
-- 生产环境通过两个飞书服务工作：长连接即时回复 + 每日 09:30 定时群通报
+- 生产环境只通过飞书长连接机器人工作
 - 当前没有公网 HTTP 接口可供拉取 JSON 或 PNG
-- `scripts/fetch_server_reports.py` 只适用于你另行启用 API 服务的环境，不适用于当前生产服务器
+- 旧 Matplotlib 海报、all-in-one 图、定时 09:30 群通报已经退场
 
-详细部署步骤见 [docs/deploy-weex-cloudserver.md](docs/deploy-weex-cloudserver.md)。
+详细部署步骤见 [docs/deploy-self-cloudserver.md](docs/deploy-self-cloudserver.md)。
 
 ## 仓库结构
 
@@ -35,12 +34,12 @@ YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决�
 ├── deploy/systemd/             # systemd unit 模板
 ├── docs/                       # 部署与运维文档
 ├── scripts/                    # 仓库级运行入口
-│   └── poster/                 # 海报生成子系统
 ├── switchbase_teamview/        # 核心 Python 包
 ├── tests/                      # 测试
+├── typst/                      # Typst 海报模板
 ├── .codex/check-maxline.json   # 单文件行数约束
 ├── .env.template               # 环境变量模板
-├── teamview_aliases.template.json
+├── teamview_whitelist.template.json
 └── README.md
 ```
 
@@ -49,6 +48,7 @@ YunDrone 团队内部使用的 TeamView 工具仓库。当前仓库主要解决�
 - Python 3.12+
 - `uv`
 - Git LFS
+- Typst 0.14+
 
 首次克隆后先准备字体资源：
 
@@ -62,6 +62,7 @@ uv sync
 
 - `assets/NotoSansSC/*.otf` 通过 Git LFS 管理
 - 如果字体没拉完整，海报里容易出现方框字或字重失效
+- 飞书即时报告和手动 PNG 导出都依赖 `typst` 命令在 `PATH` 中
 
 ## 本地配置
 
@@ -69,19 +70,18 @@ uv sync
 
 ```bash
 cp .env.template .env
-cp teamview_aliases.template.json teamview_aliases.json
+cp teamview_whitelist.template.json teamview_whitelist.json
 ```
 
 `.env` 至少需要这些变量：
 
 ```env
 SWITCHBASE_TEAMVIEW_API_KEY=stv_your_api_key_here
-SWITCHBASE_TEAMVIEW_ALIAS_FILE=./teamview_aliases.json
+SWITCHBASE_TEAMVIEW_WHITELIST_FILE=./teamview_whitelist.json
 SWITCHBASE_TEAMVIEW_TIMEZONE=Asia/Shanghai
 FEISHU_APP_ID=cli_your_app_id_here
 FEISHU_APP_SECRET=your_feishu_app_secret_here
 FEISHU_LOG_LEVEL=INFO
-FEISHU_REPORT_CHAT_ID=oc_your_group_chat_id_here
 ```
 
 可选变量：
@@ -95,9 +95,10 @@ SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN=change_this_to_a_long_random_token
 
 说明：
 
-- `.env` 和 `teamview_aliases.json` 已在 `.gitignore` 中忽略
+- `.env` 和 `teamview_whitelist.json` 已在 `.gitignore` 中忽略
 - 所有入口都会自动向上查找并加载 `.env`
-- 别名文件以邮箱为主键，飞书机器人与本地海报都会复用它
+- 白名单文件用 `email:` / `username:` / `id:` 匹配用户，`include` 控制是否进入白名单榜单，`alias` 控制展示名
+- 飞书即时机器人不需要固定群聊 ID，回复目标来自飞书消息事件
 
 ## 主要能力
 
@@ -117,57 +118,28 @@ uv run teamview-cli logs --size 10 --json
 uv run python scripts/run_cli.py validate
 ```
 
-### 2. 海报生成
+### 2. Typst 海报生成
 
-当前海报系统已经拆到 `scripts/poster/`，职责分层是：
-
-- `models.py`: 标准化 snapshot / request / config
-- `policy.py`: `filtered` / `all-members` 等策略
-- `loaders.py`: `api` / `json` / `teamview` / `memory-test-hook`
-- `layout.py`: 刻度、边距、track 几何
-- `render.py`: Matplotlib 绘制
-- `export.py`: PNG 导出
-- `cli.py`: Typer CLI
-
-常用命令：
-
-从本地 JSON 生成海报：
+推荐使用 Typst 单图入口，一次刷新 TeamView 数据、导出 Typst CSV，并编译出 9 张 PNG：
 
 ```bash
-uv run python -m scripts.poster \
-  --input-source json \
-  --period daily \
-  --input-file ./outputs/daily.json
+uv run python scripts/render_typst_posters.py
 ```
 
-直接从 TeamView 原始数据生成全员榜：
+默认输出到：
+
+```text
+outputs/typst-posters/<metric>/<period>.png
+```
+
+其中 `metric` 是 `tokens`、`quota`、`intensity`，`period` 是 `daily`、`weekly`、`monthly`。也可以只生成一张图：
 
 ```bash
-uv run python -m scripts.poster \
-  --input-source teamview \
-  --period weekly \
-  --scope all-members \
-  --top-n 7
+uv run python scripts/render_typst_posters.py --metric quota --period daily
+uv run python scripts/render_typst_posters.py --output-dir outputs/typst-posters --ppi 200
 ```
 
-如果你启用了本地 API，也可以从 API 拉：
-
-```bash
-uv run python -m scripts.poster \
-  --input-source api \
-  --period daily \
-  --base-url http://127.0.0.1:8000/api/public-rankings \
-  --token "$SWITCHBASE_TEAMVIEW_PUBLIC_TOKEN"
-```
-
-关键约束：
-
-- `--scope filtered|all-members`
-- `--input-source api` 只允许 `--scope filtered`
-- `--scope all-members` 必须配合 `teamview`、`json` 或 `memory-test-hook`
-- `--period all` 会一次输出三张图，不会再把三份榜单拼到一张图里
-- 默认输出目录是 `./outputs/`
-- 运行时会打印 `[poster] ...` 调试日志，方便 Agent 和脚本排障
+Typst 入口只负责单 metric + 单 period 的图，不生成 all-in-one 图。如果命令提示找不到 `typst`，先安装 Typst 或确认 `typst` 已在 `PATH` 中。
 
 ### 3. 飞书机器人
 
@@ -187,36 +159,36 @@ uv run python scripts/run_feishu_bot.py
 
 - 使用飞书官方 `lark-oapi` 长连接，不需要公网回调 URL
 - 订阅 `im.message.receive_v1`
-- 支持群聊 `@机器人 日报|周报|月报|总览|quota日报|成本强度日报`
-- 支持单聊直接发 `日报|周报|月报|总览|quota日报|成本强度日报`
-- 如果只是 `@机器人` 或发送内容只有空格，会返回使用方法
-- 如果发送内容不是精确命令，会回复使用方法
+- 支持群聊 `@机器人 报告`
+- 支持单聊直接发 `报告`
+- 如果只是 `@机器人`、发送空白或发送其他内容，会返回使用方法卡片
+- `日报`、`周报`、`月报`、`总览`、`quota`、`成本强度` 等旧命令会返回使用方法
+- 如果群消息包含 `@所有人`，会被直接忽略，不回复 help 也不发图
 - 即时交互会给原消息添加状态表情：处理中 `Alarm`，成功 `DONE`，非法输入 `THINKING`，处理失败 `SWEAT`
-- 收到消息后按当前分钟即时生成榜单
+- 收到 `报告` 后按当前分钟即时生成 Typst Token 日/周/月三合一图
 - 统计窗口固定使用 `Asia/Shanghai`
-- 回复使用 `all-members` scope
-- 当前固定返回 Top 10；如果总人数不足 10，则显示全部成员
-- 同一会话两次报告请求至少间隔 5 秒，过快会提示 `失败，两次请求至少间隔5s`
+- 回复使用 `whitelist` scope，只展示 `teamview_whitelist.json` 中 `include=true` 的成员
+- 全局同一时间只允许制作一张图，制作中会提示 `正在制作中，请勿重复请求`
+- 成功发图后的 10 秒内再次请求，会提示剩余冷却秒数
 - 同一分钟复用缓存，跨分钟自动失效
-- 命中邮箱别名后会展示别名
+- 命中 `teamview_whitelist.json` 里的 `alias` 后会展示该名称，未命中则回退上游显示名
 
-即时窗口规则：
+三合一海报包含：
 
-- `日报`: 当天 `00:00` 到当前分钟
-- `周报`: 本周一 `00:00` 到当前分钟
-- `月报`: 本月 1 日 `00:00` 到当前分钟
-- `总览`: 同时返回上述三种窗口的三合一图，均截止到当前分钟
+- 日报：当天 `00:00` 到当前分钟
+- 周报：本周一 `00:00` 到当前分钟
+- 月报：本月 1 日 `00:00` 到当前分钟
 
 缓存目录：
 
 ```text
-outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
+outputs/feishu-cache/whitelist/tokens/trio/<YYYYMMDDHHMM>/
 ```
 
 例如：
 
-- `12:23:12` 请求日报，会生成 `00:00 -> 12:23`
-- `12:23:59` 再请求日报，会复用同一分钟缓存
+- `12:23:12` 请求报告，会生成日/周/月三个窗口到 `12:23`
+- `12:23:59` 再请求报告，会复用同一分钟缓存
 - `12:24:00` 之后首次请求，会生成新的 `12:24` 版本
 
 幂等与去重：
@@ -236,72 +208,15 @@ outputs/feishu-cache/all-members/<period>/<YYYYMMDDHHMM>/
 - `failed-send-image`
 - `failed-send-text`
 
-### 4. 可选服务
+### 4. 可选 API 服务
 
-仓库里仍然保留两类可选能力，但它们不是当前生产部署的一部分：
+仓库仍保留 `teamview-api` / `scripts/run_api.py`，适合本地开发或内网只读 JSON 调试。当前 API 只保留 `/api/public-rankings/<period>`，不再提供 `/api/generated-reports/*`。
 
-- `teamview-api` / `scripts/run_api.py`
-- `teamview-report-daemon` / `scripts/run_report_daemon.py`
-
-它们适合：
-
-- 本地开发调试
-- 内网环境自行启用
-- 需要对外暴露只读 JSON / PNG 接口的单独部署
-
-它们不适合拿来描述当前 `weex-cloudserver` 的线上状态，因为现在那台服务器已经停掉了这两类服务。
-
-### 5. 飞书定时通报
-
-仓库还提供一个独立的飞书定时通报服务：
-
-```bash
-uv run teamview-feishu-group-reporter
-```
-
-或者：
-
-```bash
-uv run python scripts/run_feishu_group_reporter.py
-```
-
-当前固定行为：
-
-- 时区：`Asia/Shanghai`
-- 目标群：由 `FEISHU_REPORT_CHAT_ID` 指定
-- 口径：`all-members`
-- 展示人数：`min(总人数, 10)`
-- 名称来源：`teamview_aliases.json`
-
-发送规则：
-
-- 每天只在 `09:30` 发送一条飞书 `post` 消息
-- 消息内容为“文字 + 一张三合一总览图”
-- 日统计：昨天 `00:00 -> 今天 00:00`
-- 周统计：
-  - 普通日期：本周一 `00:00 -> 今日 09:30`
-  - 周一：上周一 `00:00 -> 本周一 00:00`，文字里标记 `<上周总览>`
-- 月统计：
-  - 普通日期：本月 1 日 `00:00 -> 今日 09:30`
-  - 每月 1 日：上月 1 日 `00:00 -> 本月 1 日 00:00`，文字里标记 `<上月总览>`
-
-实现说明：
-
-- 这是独立 systemd 服务，不和长连接 bot 混在一起
-- 服务会把定时总览图写到 `outputs/scheduled-feishu/`
-- 只有命中 `09:30` 这个分钟窗口才会发送，服务在其他时间重启不会补发
-- 同一天的 `09:30` 槽位只会成功发送一次，避免服务重启后重复通报
+它不是当前生产部署的一部分。
 
 ## 字体说明
 
-仓库内置 `assets/NotoSansSC/*.otf`，当前渲染逻辑会按用途选不同字重：
-
-- 标题: `Bold`
-- 榜单类型: `Bold`
-- 用户名: `Medium`
-- 时间与数字: `Regular` / `Light`
-
-如果发现海报字体异常，优先检查：
+仓库内置 `assets/NotoSansSC/*.otf`。如果发现海报字体异常，优先检查：
 
 1. `git lfs pull` 是否执行过
 2. `assets/NotoSansSC/` 是否是真实 OTF 文件，而不是 LFS pointer
@@ -309,10 +224,9 @@ uv run python scripts/run_feishu_group_reporter.py
 
 ## 当前生产部署约定
 
-生产服务器当前保留两个 systemd 服务：
+生产服务器当前只保留一个 systemd 服务：
 
 - `yundrone-codex-feishu-bot.service`
-- `yundrone-codex-feishu-group-reporter.service`
 
 它使用的入口是：
 
@@ -324,6 +238,7 @@ uv run python scripts/run_feishu_group_reporter.py
 
 - `yundrone-codex-logs.service`
 - `yundrone-codex-report-daemon.service`
+- `yundrone-codex-feishu-group-reporter.service`
 
 也不再监听：
 
@@ -345,6 +260,6 @@ python3 /Users/groove/.codex/skills/check-maxline/scripts/check_maxline.py --roo
 
 ## 相关文档
 
-- 部署与运维: [docs/deploy-weex-cloudserver.md](docs/deploy-weex-cloudserver.md)
+- 部署与运维: [docs/deploy-self-cloudserver.md](docs/deploy-self-cloudserver.md)
 - 本地字体资源: `assets/NotoSansSC/`
 - 飞书 systemd unit 模板: `deploy/systemd/yundrone-codex-feishu-bot.service`
