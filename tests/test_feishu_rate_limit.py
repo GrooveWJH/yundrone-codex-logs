@@ -7,7 +7,7 @@ from switchbase_teamview.feishu_bot import FeishuBotService
 from tests.feishu_test_utils import message_event
 
 
-def test_handle_message_event_rate_limits_reports_per_chat(tmp_path: Path) -> None:
+def test_handle_message_event_cools_down_reports_globally_after_success(tmp_path: Path) -> None:
     current = 100.0
     sent: list[tuple[str, Path]] = []
     sent_text: list[tuple[str, str]] = []
@@ -31,12 +31,9 @@ def test_handle_message_event_rate_limits_reports_per_chat(tmp_path: Path) -> No
             reactions.append(("delete", message_id, reaction_id))
 
     class FakeCache:
-        def resolve(self, *, period: str, metric: str = "tokens"):
-            calls.append(period)
-            return SimpleNamespace(period=period, poster_path=poster, from_cache=False)
-
-        def resolve_overview(self, *, metric: str = "tokens"):
-            raise AssertionError(metric)
+        def resolve_trio(self, *, metric: str):
+            calls.append(metric)
+            return SimpleNamespace(poster_path=poster, from_cache=False)
 
     service = FeishuBotService(
         feishu_client=FakeFeishuClient(),
@@ -45,13 +42,13 @@ def test_handle_message_event_rate_limits_reports_per_chat(tmp_path: Path) -> No
         time_provider=lambda: current,
     )
 
-    assert service.handle_message_event(message_event(text="日报", message_id="om_first")) is True
+    assert service.handle_message_event(message_event(text="报告", chat_type="p2p", message_id="om_first")) is True
     current = 104.9
-    assert service.handle_message_event(message_event(text="周报", message_id="om_second")) is True
-    current = 105.0
-    assert service.handle_message_event(message_event(text="日报", message_id="om_third")) is True
+    assert service.handle_message_event(message_event(text="报告", chat_id="oc_other_chat", chat_type="p2p", message_id="om_second")) is True
+    current = 110.0
+    assert service.handle_message_event(message_event(text="报告", chat_type="p2p", message_id="om_third")) is True
 
-    assert calls == ["daily", "daily"]
+    assert calls == ["tokens", "tokens"]
     assert sent == [("oc_test_chat", poster), ("oc_test_chat", poster)]
-    assert sent_text == [("oc_test_chat", "失败，两次请求至少间隔5s")]
+    assert sent_text == [("oc_other_chat", "请等待 6 秒冷却后再操作")]
     assert ("add", "om_second", "SWEAT") in reactions

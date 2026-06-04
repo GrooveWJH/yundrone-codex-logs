@@ -9,6 +9,8 @@ def message_event(
     chat_id: str = "oc_test_chat",
     chat_type: str = "group",
     message_id: str = "om_test_message",
+    mentions: list[dict[str, object]] | None = None,
+    raw_content: str | None = None,
 ) -> P2ImMessageReceiveV1:
     return P2ImMessageReceiveV1(
         {
@@ -23,7 +25,8 @@ def message_event(
                     "chat_id": chat_id,
                     "chat_type": chat_type,
                     "message_type": "text",
-                    "content": f'{{"text":"{text}"}}',
+                    "content": raw_content or f'{{"text":"{text}"}}',
+                    "mentions": mentions or [],
                 },
             }
         }

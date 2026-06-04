@@ -6,6 +6,8 @@ from pathlib import Path
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import CreateImageRequest
 from lark_oapi.api.im.v1 import CreateImageRequestBody
+from lark_oapi.api.im.v1 import CreateFileRequest
+from lark_oapi.api.im.v1 import CreateFileRequestBody
 from lark_oapi.api.im.v1 import CreateMessageRequest
 from lark_oapi.api.im.v1 import CreateMessageRequestBody
 from lark_oapi.api.im.v1 import CreateMessageReactionRequest
@@ -14,6 +16,7 @@ from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
 from lark_oapi.api.im.v1 import Emoji
 
 from switchbase_teamview.exceptions import TeamViewError
+from switchbase_teamview.feishu_commands import TOKEN_USAGE_CARD_COMMAND
 
 
 class FeishuClient:
@@ -32,6 +35,15 @@ class FeishuClient:
             chat_id=chat_id,
             msg_type="image",
             content=json.dumps({"image_key": image_key}, ensure_ascii=False),
+        )
+
+    def send_file_by_chat_id(self, *, chat_id: str, file_path: Path, file_name: str | None = None) -> None:
+        display_name = file_name or file_path.name
+        file_key = self._upload_message_file(file_path=file_path, file_name=display_name)
+        self._send_message(
+            chat_id=chat_id,
+            msg_type="file",
+            content=json.dumps({"file_key": file_key}, ensure_ascii=False),
         )
 
     def send_text_by_chat_id(self, *, chat_id: str, text: str) -> None:
@@ -96,6 +108,24 @@ class FeishuClient:
             raise TeamViewError(f"Feishu image upload failed: code={response.code}, msg={response.msg}")
         return response.data.image_key
 
+    def _upload_message_file(self, *, file_path: Path, file_name: str) -> str:
+        with file_path.open("rb") as file:
+            request = (
+                CreateFileRequest.builder()
+                .request_body(
+                    CreateFileRequestBody.builder()
+                    .file_type(_message_file_type(file_path))
+                    .file_name(file_name)
+                    .file(file)
+                    .build()
+                )
+                .build()
+            )
+            response = self._client.im.v1.file.create(request)
+        if not response.success() or response.data is None or not response.data.file_key:
+            raise TeamViewError(f"Feishu file upload failed: code={response.code}, msg={response.msg}")
+        return response.data.file_key
+
     def _send_message(self, *, chat_id: str, msg_type: str, content: str) -> None:
         request = (
             CreateMessageRequest.builder()
@@ -125,56 +155,25 @@ class FeishuClient:
             "config": {"wide_screen_mode": True},
             "header": {"title": {"tag": "plain_text", "content": "Codex 用量报告使用方法"}},
             "elements": [
-                {"tag": "markdown", "content": "**点击按钮或 @ 机器人发送表格里的完整命令都可以生成报告。仅 @ 或发送空格，会返回本帮助。**"},
-                {
-                    "tag": "table",
-                    "columns": [
-                        {"name": "type", "display_name": "系列", "data_type": "text"},
-                        {"name": "daily", "display_name": "日", "data_type": "text"},
-                        {"name": "weekly", "display_name": "周", "data_type": "text"},
-                        {"name": "monthly", "display_name": "月", "data_type": "text"},
-                        {"name": "overview", "display_name": "总览", "data_type": "text"},
-                    ],
-                    "rows": [
-                        {"type": "Token", "daily": "日报", "weekly": "周报", "monthly": "月报", "overview": "总览"},
-                        {"type": "Quota", "daily": "quota日报", "weekly": "quota周报", "monthly": "quota月报", "overview": "quota"},
-                        {
-                            "type": "Intensity",
-                            "daily": "成本强度日报",
-                            "weekly": "成本强度周报",
-                            "monthly": "成本强度月报",
-                            "overview": "成本强度",
-                        },
-                    ],
-                },
-                {"tag": "action", "actions": _command_buttons("Token", ["日", "周", "月", "总"])},
-                {"tag": "action", "actions": _command_buttons("Quota", ["日", "周", "月", "总"])},
-                {"tag": "action", "actions": _command_buttons("Intensity", ["日", "周", "月", "总"])},
+                {"tag": "markdown", "content": "**发送「报告」或点击按钮，获取 token 用量三合一图。**"},
+                {"tag": "action", "actions": _command_buttons()},
             ],
         }
         return json.dumps(card, ensure_ascii=False)
 
 
-def _command_buttons(series: str, labels: list[str]) -> list[dict[str, object]]:
-    series_button = {
-        "tag": "button",
-        "text": {"tag": "plain_text", "content": series},
-        "type": "primary",
-        "value": {"command": _button_command(series, "总")},
-    }
-    period_buttons = [
+def _command_buttons() -> list[dict[str, object]]:
+    return [
         {
             "tag": "button",
-            "text": {"tag": "plain_text", "content": label},
-            "type": "default",
-            "value": {"command": _button_command(series, label)},
+            "text": {"tag": "plain_text", "content": "打印用量报告"},
+            "type": "primary",
+            "value": {"command": TOKEN_USAGE_CARD_COMMAND},
         }
-        for label in labels
     ]
-    return [series_button, *period_buttons]
 
 
-def _button_command(series: str, label: str) -> str:
-    prefixes = {"Token": "", "Quota": "quota_", "Intensity": "intensity_"}
-    suffixes = {"日": "daily", "周": "weekly", "月": "monthly", "总": "overview"}
-    return f"{prefixes[series]}{suffixes[label]}"
+def _message_file_type(file_path: Path) -> str:
+    if file_path.suffix.lower() == ".pdf":
+        return "pdf"
+    return "stream"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from switchbase_teamview.feishu_commands import TOKEN_USAGE_CARD_COMMAND
 from switchbase_teamview.feishu_client import FeishuClient
 
 
@@ -47,7 +48,7 @@ def test_send_post_with_image_builds_single_post_message(tmp_path: Path) -> None
     }
 
 
-def test_send_usage_help_builds_table_card_message() -> None:
+def test_send_usage_help_builds_single_token_usage_button_card() -> None:
     seen: dict[str, object] = {}
 
     class FakeFeishuClient(FeishuClient):
@@ -62,21 +63,54 @@ def test_send_usage_help_builds_table_card_message() -> None:
     FakeFeishuClient().send_usage_help_by_chat_id(chat_id="oc_private")
 
     elements = seen["content"]["elements"]  # type: ignore[index]
-    table = elements[1]
     assert seen["chat_id"] == "oc_private"
     assert seen["msg_type"] == "interactive"
     assert seen["content"]["header"]["title"]["content"] == "Codex 用量报告使用方法"  # type: ignore[index]
     assert elements[0]["tag"] == "markdown"
-    assert table["tag"] == "table"
-    assert [column["display_name"] for column in table["columns"]] == ["系列", "日", "周", "月", "总览"]
-    assert table["rows"][0] == {"type": "Token", "daily": "日报", "weekly": "周报", "monthly": "月报", "overview": "总览"}
-    assert table["rows"][1]["daily"] == "quota日报"
-    assert table["rows"][2]["daily"] == "成本强度日报"
-    assert table["rows"][2]["overview"] == "成本强度"
-    assert elements[2]["actions"][0]["value"] == {"command": "overview"}
-    assert elements[2]["actions"][1]["value"] == {"command": "daily"}
-    assert elements[4]["actions"][0]["value"] == {"command": "intensity_overview"}
-    assert elements[4]["actions"][3]["value"] == {"command": "intensity_monthly"}
+    assert len(elements) == 2
+    assert elements[1]["tag"] == "action"
+    assert elements[1]["actions"] == [
+        {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "打印用量报告"},
+            "type": "primary",
+            "value": {"command": TOKEN_USAGE_CARD_COMMAND},
+        }
+    ]
+
+
+def test_send_file_uploads_and_sends_file_message(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+    file_path = tmp_path / "report.pdf"
+    file_path.write_bytes(b"pdf")
+
+    class FakeFeishuClient(FeishuClient):
+        def __init__(self) -> None:
+            pass
+
+        def _upload_message_file(self, *, file_path: Path, file_name: str) -> str:
+            seen["upload_path"] = file_path
+            seen["upload_name"] = file_name
+            return "file_v3_key"
+
+        def _send_message(self, *, chat_id: str, msg_type: str, content: str) -> None:
+            seen["chat_id"] = chat_id
+            seen["msg_type"] = msg_type
+            seen["content"] = json.loads(content)
+
+    FakeFeishuClient().send_file_by_chat_id(
+        chat_id="oc_private",
+        file_path=file_path,
+        file_name="用量报告-20260604132905.pdf",
+    )
+
+    assert seen == {
+        "upload_path": file_path,
+        "upload_name": "用量报告-20260604132905.pdf",
+        "chat_id": "oc_private",
+        "msg_type": "file",
+        "content": {"file_key": "file_v3_key"},
+    }
 
 
 def test_add_and_delete_message_reaction_build_requests() -> None:
