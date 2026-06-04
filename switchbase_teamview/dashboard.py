@@ -1,11 +1,9 @@
-"""Dashboard service and alias persistence for the TeamView board."""
+"""Dashboard service and whitelist persistence for the TeamView board."""
 
 from __future__ import annotations
 
-import json
 import os
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -16,39 +14,11 @@ from switchbase_teamview.env import load_project_env
 from switchbase_teamview.exceptions import TeamViewError
 from switchbase_teamview.models import UsageMember, UsageResponse
 from switchbase_teamview.rankings import RankingScope, apply_ranking_scope, resolve_ranking_window, validate_ranking_scope
+from switchbase_teamview.whitelist import WhitelistEntry, WhitelistStore, match_whitelist_entry
 
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 RANKING_TIMEZONE = "Asia/Shanghai"
-DEFAULT_ALIAS_FILE = "teamview_aliases.json"
-
-
-@dataclass
-class AliasStore:
-    """Persist alias mappings by email."""
-
-    path: Path
-
-    def load(self) -> dict[str, str]:
-        if not self.path.exists():
-            return {}
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise TeamViewError(f"Alias file is invalid JSON: {self.path}") from exc
-        if not isinstance(raw, dict):
-            raise TeamViewError(f"Alias file must contain an object: {self.path}")
-        return {str(key): str(value) for key, value in raw.items()}
-
-    def set_alias(self, *, email: str, alias: str) -> None:
-        data = self.load()
-        normalized = alias.strip()
-        if normalized:
-            data[email] = normalized
-        else:
-            data.pop(email, None)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
+DEFAULT_WHITELIST_FILE = "teamview_whitelist.json"
 
 class DashboardService:
     """Aggregate TeamView usage into dashboard-friendly payloads."""
@@ -57,7 +27,7 @@ class DashboardService:
         self,
         *,
         client_factory: Callable[[], Any] | None = None,
-        alias_store: AliasStore | None = None,
+        whitelist_store: WhitelistStore | None = None,
         timezone: str = DEFAULT_TIMEZONE,
         now_provider: Callable[[], datetime] | None = None,
         ranking_ttl_seconds: int = 60,
@@ -66,17 +36,21 @@ class DashboardService:
         self.ranking_timezone = ZoneInfo(RANKING_TIMEZONE)
         self.now_provider = now_provider or (lambda: datetime.now(self.timezone))
         self.client_factory = client_factory or self._default_client_factory
-        self.alias_store = alias_store or AliasStore(Path(DEFAULT_ALIAS_FILE))
+        self.whitelist_store = whitelist_store or WhitelistStore(Path(DEFAULT_WHITELIST_FILE))
         self.ranking_ttl_seconds = ranking_ttl_seconds
         self._ranking_cache: tuple[float, dict[str, Any]] | None = None
 
     @classmethod
     def from_env(cls) -> "DashboardService":
         load_project_env()
-        alias_file = Path(os.getenv("SWITCHBASE_TEAMVIEW_ALIAS_FILE", DEFAULT_ALIAS_FILE))
+        whitelist_file = Path(os.getenv("SWITCHBASE_TEAMVIEW_WHITELIST_FILE", DEFAULT_WHITELIST_FILE))
         timezone = os.getenv("SWITCHBASE_TEAMVIEW_TIMEZONE", DEFAULT_TIMEZONE)
         ttl = int(os.getenv("SWITCHBASE_TEAMVIEW_RANKING_TTL", "60"))
-        return cls(alias_store=AliasStore(alias_file), timezone=timezone, ranking_ttl_seconds=ttl)
+        return cls(
+            whitelist_store=WhitelistStore(whitelist_file),
+            timezone=timezone,
+            ranking_ttl_seconds=ttl,
+        )
 
     def get_dashboard(
         self,
@@ -181,14 +155,6 @@ class DashboardService:
             limit=limit,
         )
 
-    def set_alias(self, *, email: str, alias: str) -> dict[str, str]:
-        normalized_email = email.strip()
-        if not normalized_email:
-            raise TeamViewError("Email is required for alias updates")
-        self.alias_store.set_alias(email=normalized_email, alias=alias)
-        self._ranking_cache = None
-        return {"email": normalized_email, "alias": alias.strip()}
-
     def _default_client_factory(self) -> TeamViewClient:
         api_key = os.getenv("SWITCHBASE_TEAMVIEW_API_KEY")
         if not api_key:
@@ -216,32 +182,39 @@ class DashboardService:
         )["items"]
 
     def _transform_members(self, members: list[UsageMember]) -> list[dict[str, Any]]:
-        aliases = self.alias_store.load()
+        whitelist = self.whitelist_store.load()
         ranked = [
-            {
-                "email": member.email,
-                "display_name": self._display_name(member, aliases),
-                "alias": aliases.get(member.email, ""),
-                "username": member.username,
-                "raw_display_name": member.display_name,
-                "role": member.role,
-                "user_group": member.user_group,
-                "request_count": member.request_count,
-                "used_tokens": member.used_tokens,
-                "used_quota": member.used_quota,
-                "window_used_quota": member.window_used_quota,
-                "quota": member.quota,
-                "newapi_user_id": member.newapi_user_id,
-                "synced_at": member.synced_at,
-            }
+            self._member_payload(member, whitelist=whitelist)
             for member in members
         ]
         ranked.sort(key=lambda item: (-item["used_tokens"], item["email"], item["username"]))
         return ranked
 
     @staticmethod
-    def _display_name(member: UsageMember, aliases: dict[str, str]) -> str:
-        return aliases.get(member.email, "").strip() or member.display_name.strip() or member.username.strip() or member.email.strip()
+    def _member_payload(
+        member: UsageMember,
+        *,
+        whitelist: dict[str, WhitelistEntry],
+    ) -> dict[str, Any]:
+        whitelist_entry = match_whitelist_entry(member, whitelist)
+        alias = whitelist_entry.alias if whitelist_entry else ""
+        return {
+            "email": member.email,
+            "display_name": alias or member.display_name.strip() or member.username.strip() or member.email.strip(),
+            "alias": alias,
+            "username": member.username,
+            "raw_display_name": member.display_name,
+            "role": member.role,
+            "user_group": member.user_group,
+            "request_count": member.request_count,
+            "used_tokens": member.used_tokens,
+            "used_quota": member.used_quota,
+            "window_used_quota": member.window_used_quota,
+            "quota": member.quota,
+            "newapi_user_id": member.newapi_user_id,
+            "synced_at": member.synced_at,
+            "whitelisted": bool(whitelist_entry and whitelist_entry.include),
+        }
 
     def _resolve_ranking_window(self, ranking_type: str) -> dict[str, int | str]:
         return resolve_ranking_window(ranking_type=ranking_type, now=self.now_provider().astimezone(self.ranking_timezone))

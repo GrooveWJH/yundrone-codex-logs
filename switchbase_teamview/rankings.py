@@ -5,17 +5,19 @@ from typing import Literal
 
 from switchbase_teamview.exceptions import TeamViewError
 
-RankingScope = Literal["filtered", "all-members"]
+RankingScope = Literal["filtered", "all-members", "whitelist"]
 
 
 def validate_ranking_scope(scope: RankingScope) -> None:
-    if scope not in {"filtered", "all-members"}:
+    if scope not in {"filtered", "all-members", "whitelist"}:
         raise TeamViewError(f"Unsupported ranking scope: {scope}")
 
 
 def apply_ranking_scope(items: list[dict[str, object]], scope: RankingScope) -> list[dict[str, object]]:
     if scope == "all-members":
         return items
+    if scope == "whitelist":
+        return [item for item in items if bool(item.get("whitelisted"))]
     return [item for item in items if is_filtered_ranking_member(str(item.get("email") or ""))]
 
 

@@ -1,0 +1,14 @@
+{
+  "email:member@example.com": {
+    "alias": "示例成员",
+    "include": true
+  },
+  "username:temporary-user": {
+    "alias": "",
+    "include": false
+  },
+  "id:1": {
+    "alias": "",
+    "include": false
+  }
+}

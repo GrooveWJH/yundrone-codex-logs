@@ -32,14 +32,10 @@ def _usage_response(members: list[dict[str, object]]) -> UsageResponse:
     )
 
 
-def test_dashboard_service_applies_alias_and_last_7_days_window(tmp_path: Path) -> None:
+def test_dashboard_service_uses_display_name_and_last_7_days_window() -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
-    alias_file = tmp_path / "aliases.json"
-    alias_file.write_text(json.dumps({"alice@example.com": "Alice Ops"}), encoding="utf-8")
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
     seen_calls: list[tuple[int | None, int | None]] = []
 
@@ -85,7 +81,6 @@ def test_dashboard_service_applies_alias_and_last_7_days_window(tmp_path: Path) 
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(alias_file),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -95,7 +90,7 @@ def test_dashboard_service_applies_alias_and_last_7_days_window(tmp_path: Path) 
     expected_end = int(fixed_now.timestamp())
 
     assert payload["meta"]["preset"] == "last_7_days"
-    assert payload["members"][0]["display_name"] == "Alice Ops"
+    assert payload["members"][0]["display_name"] == "Alice"
     assert payload["members"][1]["display_name"] == "bob"
     assert payload["summary"]["total_used_tokens"] == 410
     assert payload["summary"]["total_window_used_quota"] == 0
@@ -104,9 +99,7 @@ def test_dashboard_service_applies_alias_and_last_7_days_window(tmp_path: Path) 
 
 def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
     windows_seen: list[tuple[int, int]] = []
@@ -225,7 +218,6 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -245,9 +237,7 @@ def test_dashboard_service_builds_rankings_with_fixed_windows_and_sorting(tmp_pa
 
 def test_dashboard_service_uses_natural_daily_weekly_monthly_ranking_windows(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
     seen_calls: list[tuple[int | None, int | None]] = []
@@ -281,7 +271,6 @@ def test_dashboard_service_uses_natural_daily_weekly_monthly_ranking_windows(tmp
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -307,9 +296,7 @@ def test_dashboard_service_uses_natural_daily_weekly_monthly_ranking_windows(tmp
 
 def test_dashboard_service_rankings_are_anchored_to_asia_shanghai_timezone(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     utc_now = datetime(2026, 4, 15, 2, 30, tzinfo=ZoneInfo("UTC"))
     seen_calls: list[tuple[int | None, int | None]] = []
@@ -343,7 +330,6 @@ def test_dashboard_service_rankings_are_anchored_to_asia_shanghai_timezone(tmp_p
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         timezone="UTC",
         now_provider=lambda: utc_now,
         ranking_ttl_seconds=60,
@@ -360,9 +346,7 @@ def test_dashboard_service_rankings_are_anchored_to_asia_shanghai_timezone(tmp_p
 
 def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -394,7 +378,6 @@ def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) 
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -408,9 +391,7 @@ def test_dashboard_service_returns_single_public_ranking_bucket(tmp_path: Path) 
 
 def test_dashboard_service_returns_explicit_window_ranking_payload(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 16, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
     seen_calls: list[tuple[int | None, int | None]] = []
@@ -447,7 +428,6 @@ def test_dashboard_service_returns_explicit_window_ranking_payload(tmp_path: Pat
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -467,9 +447,7 @@ def test_dashboard_service_returns_explicit_window_ranking_payload(tmp_path: Pat
 
 def test_dashboard_service_returns_empty_window_payload_without_fetching(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     class FakeClient:
         def get_usage(self, **kwargs) -> UsageResponse:  # pragma: no cover - should not be called
@@ -477,7 +455,6 @@ def test_dashboard_service_returns_empty_window_payload_without_fetching(tmp_pat
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: datetime(2026, 4, 14, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         ranking_ttl_seconds=60,
     )
@@ -494,9 +471,7 @@ def test_dashboard_service_returns_empty_window_payload_without_fetching(tmp_pat
 
 def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_codex(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     fixed_now = datetime(2026, 4, 15, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -567,7 +542,6 @@ def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_cod
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: fixed_now,
         ranking_ttl_seconds=60,
     )
@@ -590,9 +564,7 @@ def test_dashboard_service_rankings_only_include_yundrone_domain_and_exclude_cod
 
 def test_dashboard_service_build_ranking_supports_filtered_and_all_members_scopes(tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
-    AliasStore = getattr(dashboard_module, "AliasStore", None)
     assert DashboardService is not None
-    assert AliasStore is not None
 
     start_timestamp = int(datetime(2026, 4, 15, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
     end_timestamp = int(datetime(2026, 4, 15, 23, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
@@ -645,7 +617,6 @@ def test_dashboard_service_build_ranking_supports_filtered_and_all_members_scope
 
     service = DashboardService(
         client_factory=lambda: FakeClient(),
-        alias_store=AliasStore(tmp_path / "aliases.json"),
         now_provider=lambda: datetime(2026, 4, 16, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         ranking_ttl_seconds=60,
     )
@@ -675,17 +646,102 @@ def test_dashboard_service_build_ranking_supports_filtered_and_all_members_scope
     assert all_members["scope"] == "all-members"
 
 
+def test_dashboard_service_build_ranking_supports_whitelist_scope(tmp_path: Path) -> None:
+    DashboardService = getattr(dashboard_module, "DashboardService", None)
+    WhitelistStore = getattr(dashboard_module, "WhitelistStore", None)
+    assert DashboardService is not None
+    assert WhitelistStore is not None
+
+    start_timestamp = int(datetime(2026, 4, 15, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    end_timestamp = int(datetime(2026, 4, 15, 23, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+    whitelist_file = tmp_path / "whitelist.json"
+    whitelist_file.write_text(
+        json.dumps(
+            {
+                "username:alice": {"alias": "Alice Team", "include": True},
+                "email:bob@example.com": {"alias": "Bob External", "include": False},
+                "id:3": {"alias": "Carol Ops", "include": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    members = [
+        {
+            "newapi_user_id": 1,
+            "username": "alice",
+            "display_name": "Alice",
+            "email": "",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 700,
+            "request_count": 20,
+            "used_tokens": 230,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 2,
+            "username": "bob",
+            "display_name": "Bob",
+            "email": "bob@example.com",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 500,
+            "request_count": 25,
+            "used_tokens": 500,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+        {
+            "newapi_user_id": 3,
+            "username": "carol",
+            "display_name": "Carol",
+            "email": "carol@example.com",
+            "role": "member",
+            "quota": 1000,
+            "used_quota": 900,
+            "request_count": 30,
+            "used_tokens": 900,
+            "user_group": "default",
+            "synced_at": 1776244478,
+        },
+    ]
+
+    class FakeClient:
+        def get_usage(self, **kwargs) -> UsageResponse:
+            del kwargs
+            return _usage_response(members)
+
+    service = DashboardService(
+        client_factory=lambda: FakeClient(),
+        whitelist_store=WhitelistStore(whitelist_file),
+        now_provider=lambda: datetime(2026, 4, 16, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        ranking_ttl_seconds=60,
+    )
+
+    whitelisted = service.build_ranking(
+        scope="whitelist",
+        ranking_type="daily",
+        start_timestamp=start_timestamp,
+        end_timestamp=end_timestamp,
+        limit=10,
+    )
+
+    assert [item["display_name"] for item in whitelisted["items"]] == ["Carol Ops", "Alice Team"]
+    assert [item["username"] for item in whitelisted["items"]] == ["carol", "alice"]
+    assert whitelisted["scope"] == "whitelist"
+
+
 def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) -> None:
     DashboardService = getattr(dashboard_module, "DashboardService", None)
     assert DashboardService is not None
 
     seen: dict[str, object] = {}
-    alias_file = tmp_path / "aliases.json"
     (tmp_path / ".env").write_text(
         "\n".join(
             [
                 "SWITCHBASE_TEAMVIEW_API_KEY=stv_from_dotenv",
-                f"SWITCHBASE_TEAMVIEW_ALIAS_FILE={alias_file}",
+                f"SWITCHBASE_TEAMVIEW_WHITELIST_FILE={tmp_path / 'whitelist.json'}",
                 "SWITCHBASE_TEAMVIEW_TIMEZONE=Asia/Shanghai",
                 "SWITCHBASE_TEAMVIEW_RANKING_TTL=90",
             ]
@@ -695,7 +751,6 @@ def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) ->
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SWITCHBASE_TEAMVIEW_API_KEY", raising=False)
-    monkeypatch.delenv("SWITCHBASE_TEAMVIEW_ALIAS_FILE", raising=False)
     monkeypatch.delenv("SWITCHBASE_TEAMVIEW_TIMEZONE", raising=False)
     monkeypatch.delenv("SWITCHBASE_TEAMVIEW_RANKING_TTL", raising=False)
 
@@ -710,7 +765,7 @@ def test_dashboard_service_from_env_loads_dotenv(monkeypatch, tmp_path: Path) ->
     client = service.client_factory()
 
     assert seen["api_key"] == "stv_from_dotenv"
-    assert service.alias_store.path == alias_file
+    assert service.whitelist_store.path == tmp_path / "whitelist.json"
     assert service.ranking_ttl_seconds == 90
     assert str(service.timezone) == "Asia/Shanghai"
     assert client is not None
